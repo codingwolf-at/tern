@@ -344,6 +344,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				INFOPLIST_FILE = "Config/Tern-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Tern;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -357,6 +358,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = so.plane.tern;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				TERN_GITHUB_CLIENT_ID = "";
 			};
 			name = Debug;
 		};
@@ -373,6 +375,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				INFOPLIST_FILE = "Config/Tern-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Tern;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -386,6 +389,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = so.plane.tern;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				TERN_GITHUB_CLIENT_ID = "";
 			};
 			name = Release;
 		};

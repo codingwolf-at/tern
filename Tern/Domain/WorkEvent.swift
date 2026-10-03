@@ -52,6 +52,14 @@ extension WorkEventKind {
     static let changesRequested = WorkEventKind(rawValue: "github.review.changes_requested")
     static let reviewerResponded = WorkEventKind(rawValue: "github.review.responded")
     static let reviewApproved = WorkEventKind(rawValue: "github.review.approved")
+    static let reviewRequestRemoved = WorkEventKind(rawValue: "github.review.request_removed")
+    static let reviewCommented = WorkEventKind(rawValue: "github.review.commented")
+    static let reviewDismissed = WorkEventKind(rawValue: "github.review.dismissed")
+    static let reviewCommentAdded = WorkEventKind(rawValue: "github.comment.added")
+    static let reviewThreadResolved = WorkEventKind(rawValue: "github.thread.resolved")
+    static let pullRequestReadyForReview = WorkEventKind(rawValue: "github.pr.ready_for_review")
+    static let pullRequestConvertedToDraft = WorkEventKind(rawValue: "github.pr.converted_to_draft")
+    static let pullRequestReopened = WorkEventKind(rawValue: "github.pr.reopened")
     static let commitsPushed = WorkEventKind(rawValue: "github.commits.pushed")
     static let ciStarted = WorkEventKind(rawValue: "github.ci.started")
     static let ciPassed = WorkEventKind(rawValue: "github.ci.passed")
@@ -101,6 +109,9 @@ struct WorkEvent: Identifiable, Hashable, Sendable, Codable {
     subscript(key: MetadataKey) -> String? {
         metadata[key.rawValue]
     }
+
+    /// Whether the user caused this event. Events without actor information count as someone else's.
+    var isByMe: Bool { self[.actorIsMe] == "true" }
 }
 
 /// Well-known metadata keys. Integrations may store additional keys as plain strings.
@@ -116,6 +127,17 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let reason = MetadataKey(rawValue: "reason")
     static let title = MetadataKey(rawValue: "title")
     static let startsAt = MetadataKey(rawValue: "startsAt")
+    /// Who caused the event (a login or name), and whether that was the user.
+    static let actor = MetadataKey(rawValue: "actor")
+    static let actorIsMe = MetadataKey(rawValue: "actorIsMe")
+    /// Review requests: whether the requested reviewer is the user.
+    static let reviewerIsMe = MetadataKey(rawValue: "reviewerIsMe")
+    /// Pull requests: `author` when the user wrote it, `reviewer` otherwise.
+    static let role = MetadataKey(rawValue: "role")
+    static let isDraft = MetadataKey(rawValue: "isDraft")
+    static let headSHA = MetadataKey(rawValue: "headSHA")
+    static let threadID = MetadataKey(rawValue: "threadID")
+    static let pullRequestNodeID = MetadataKey(rawValue: "pullRequestNodeID")
 }
 
 extension WorkEvent {

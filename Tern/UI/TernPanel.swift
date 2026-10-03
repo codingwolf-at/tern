@@ -32,6 +32,11 @@ struct TernPanel: View {
             ClaudeDiagnosticsView(receiver: model.claudeHooks, workstreams: model.workstreams)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+            if let github = model.github {
+                GitHubDiagnosticsView(account: github)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
             if let player = model.scenarioPlayer {
                 Divider()
                 ScenarioControls(player: player)
@@ -39,6 +44,12 @@ struct TernPanel: View {
                     .padding(.vertical, 10)
             }
             #endif
+            if let github = model.github {
+                Divider()
+                GitHubConnectionView(account: github)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             Divider()
             footer
                 .padding(.horizontal, 16)

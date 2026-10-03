@@ -132,6 +132,18 @@ private struct WorkstreamDetail: View {
             if let meeting = workstream.calendarContext {
                 row("Calendar", "\(meeting.title) \(Age.until(meeting.startsAt))")
             }
+            if let pr = workstream.pullRequest {
+                GridRow {
+                    Text("GitHub")
+                        .foregroundStyle(.tertiary)
+                        .gridColumnAlignment(.trailing)
+                    if let url = pr.url {
+                        Link("\(pr.repository)#\(pr.number) ↗", destination: url)
+                    } else {
+                        Text("\(pr.repository)#\(pr.number)").foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .font(.caption)
         .padding(10)

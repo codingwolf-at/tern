@@ -11,6 +11,8 @@ final class AppModel {
     private(set) var errorMessage: String?
     /// Entry point for Claude Code hook events. Owned here so diagnostics can observe it.
     let claudeHooks: ClaudeHookReceiver
+    /// GitHub connection and sync status; `nil` when GitHub isn't part of this model (tests).
+    let github: GitHubAccount?
 
     #if DEBUG
     /// Present only when running the mock scenario.
@@ -21,16 +23,18 @@ final class AppModel {
     private let logger = Logger(subsystem: "so.plane.tern", category: "app")
 
     #if DEBUG
-    init(service: IngestionService, scenarioPlayer: ScenarioPlayer? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
+        self.github = github
         self.scenarioPlayer = scenarioPlayer
         observe()
     }
     #else
-    init(service: IngestionService) {
+    init(service: IngestionService, github: GitHubAccount? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
+        self.github = github
         observe()
     }
     #endif
@@ -41,10 +45,15 @@ final class AppModel {
         #if DEBUG
         let service = IngestionService(store: InMemoryTernStore())
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
-        return AppModel(service: service, scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil)
+        return AppModel(
+            service: service,
+            github: GitHubAccount(clientID: GitHubAccount.configuredClientID, ingestion: service),
+            scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil
+        )
         #else
         do {
-            return AppModel(service: IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL())))
+            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()))
+            return AppModel(service: service, github: GitHubAccount(clientID: GitHubAccount.configuredClientID, ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
             model.report(error)

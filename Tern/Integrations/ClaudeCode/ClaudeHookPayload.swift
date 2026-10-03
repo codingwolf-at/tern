@@ -27,6 +27,8 @@ struct ClaudeHookPayload: Hashable, Sendable, Codable {
     /// When the hook fired, in milliseconds since 1970.
     let timestampMilliseconds: Int64?
     let gitRoot: String?
+    /// `owner/name` when the repository's origin is on GitHub.
+    let gitRemote: String?
     let gitBranch: String?
     /// Short commit hash when HEAD is detached.
     let gitHead: String?
@@ -45,6 +47,7 @@ struct ClaudeHookPayload: Hashable, Sendable, Codable {
         case sequence = "tern_seq"
         case timestampMilliseconds = "tern_ts"
         case gitRoot = "tern_git_root"
+        case gitRemote = "tern_git_remote"
         case gitBranch = "tern_git_branch"
         case gitHead = "tern_git_head"
     }
@@ -63,6 +66,7 @@ struct ClaudeHookPayload: Hashable, Sendable, Codable {
         sequence: Int? = nil,
         timestampMilliseconds: Int64? = nil,
         gitRoot: String? = nil,
+        gitRemote: String? = nil,
         gitBranch: String? = nil,
         gitHead: String? = nil
     ) {
@@ -79,6 +83,7 @@ struct ClaudeHookPayload: Hashable, Sendable, Codable {
         self.sequence = sequence
         self.timestampMilliseconds = timestampMilliseconds
         self.gitRoot = gitRoot
+        self.gitRemote = gitRemote
         self.gitBranch = gitBranch
         self.gitHead = gitHead
     }

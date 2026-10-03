@@ -57,21 +57,6 @@ struct WorkstreamFacts: Hashable, Sendable {
         }
     }
 
-    enum Review: Hashable, Sendable {
-        case none
-        case awaiting(reviewer: String?, Stamp)
-        case changesRequested(reviewer: String?, comments: Int?, Stamp)
-        case responded(reviewer: String?, comments: Int?, Stamp)
-        case approved(reviewer: String?, Stamp)
-    }
-
-    enum CI: Hashable, Sendable {
-        case unknown
-        case running(Stamp)
-        case passed(Stamp)
-        case failed(check: String?, Stamp)
-    }
-
     struct Blocked: Hashable, Sendable {
         let reason: String?
         let stamp: Stamp
@@ -83,11 +68,9 @@ struct WorkstreamFacts: Hashable, Sendable {
     }
 
     var planeItem: Stamp?
-    var pullRequest: Stamp?
     /// Agent sessions keyed by session ID.
     var agentRuns: [String: AgentRun] = [:]
-    var review: Review = .none
-    var ci: CI = .unknown
+    var pullRequest = PullRequestFacts()
     var blocked: Blocked?
     var completion: Completion?
 
@@ -135,31 +118,20 @@ struct WorkstreamFacts: Hashable, Sendable {
         case .planeItemCompleted:
             complete(stamp, reason: "Marked done in Plane")
 
-        case .pullRequestOpened:
-            pullRequest = pullRequest ?? stamp
-        case .reviewRequested:
-            review = .awaiting(reviewer: event[.reviewer], stamp)
-        case .changesRequested:
-            review = .changesRequested(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, stamp)
-        case .reviewerResponded:
-            review = .responded(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, stamp)
-        case .reviewApproved:
-            review = .approved(reviewer: event[.reviewer], stamp)
         case .commitsPushed:
+            _ = pullRequest.apply(event, stamp: stamp)
             // Pushing work means the user has picked up whatever the agents produced.
-            for (id, run) in agentRuns where run.status == .finished {
-                agentRuns[id]?.isAcknowledged = true
+            if event[.actorIsMe] != "false" {
+                for (id, run) in agentRuns where run.status == .finished {
+                    agentRuns[id]?.isAcknowledged = true
+                }
             }
-        case .ciStarted:
-            ci = .running(stamp)
-        case .ciPassed:
-            ci = .passed(stamp)
-        case .ciFailed:
-            ci = .failed(check: event[.checkName], stamp)
         case .pullRequestMerged:
             complete(stamp, reason: "Merged")
         case .pullRequestClosed:
             complete(stamp, reason: "Closed")
+        case .pullRequestReopened:
+            completion = nil
 
         case .agentSessionOpened:
             // Registers the session only. Also fires mid-turn (e.g. after compaction),
@@ -187,8 +159,9 @@ struct WorkstreamFacts: Hashable, Sendable {
             if agentRuns[id] != nil { agentRuns[id]?.updated = stamp }
 
         default:
-            // Unknown or context-only kinds (e.g. calendar) do not change ownership.
-            break
+            // Pull request kinds go to their own facts; unknown or context-only kinds
+            // (e.g. calendar) do not change ownership.
+            _ = pullRequest.apply(event, stamp: stamp)
         }
     }
 

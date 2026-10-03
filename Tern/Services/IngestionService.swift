@@ -154,6 +154,9 @@ actor IngestionService {
             nextResolver.link(observed.references, to: workstreamID)
             guard let index = next.workstreams.firstIndex(where: { $0.id == workstreamID }) else { continue }
             next.workstreams[index].events.append(observed.linked(to: workstreamID))
+            if next.workstreams[index].pullRequest == nil, let pullRequest = observed.pullRequest {
+                next.workstreams[index].pullRequest = pullRequest
+            }
             nextSeen.insert(observed.id)
             report.accepted.append(observed.id)
             if !touched.contains(workstreamID) { touched.append(workstreamID) }

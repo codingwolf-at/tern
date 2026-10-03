@@ -102,16 +102,18 @@ enum ClaudeHookNormalizer {
     }
 
     /// Where the session is working: a git branch when available, otherwise the directory.
-    /// Branches are deliberately not combined with the directory, so different branches
-    /// of one repository stay separate workstreams.
+    /// A repository on GitHub is identified as `github.com/owner/name`, the same way pull
+    /// requests are, so a session and its PR land in one workstream. Branches are deliberately
+    /// not combined with the directory, so different branches stay separate workstreams.
     static func workplace(for payload: ClaudeHookPayload) -> (reference: ExternalReference, title: String)? {
         if let root = payload.gitRoot {
             let repository = URL(fileURLWithPath: root).lastPathComponent
+            let identity = payload.gitRemote.map(ExternalReference.gitHubRepository) ?? root
             if let branch = payload.gitBranch, !branch.isEmpty {
-                return (.branch(branch, repository: root), title(branch: branch, repository: repository))
+                return (.branch(branch, repository: identity), title(branch: branch, repository: repository))
             }
             if let head = payload.gitHead, !head.isEmpty {
-                return (.branch("detached-\(head)", repository: root), "\(repository) @ \(head)")
+                return (.branch("detached-\(head)", repository: identity), "\(repository) @ \(head)")
             }
         }
         guard let cwd = payload.cwd, !cwd.isEmpty else { return nil }

@@ -12,7 +12,7 @@ struct ExternalReference: Hashable, Sendable, Codable {
     }
 
     static func pullRequest(repository: String, number: Int) -> ExternalReference {
-        ExternalReference(kind: "github.pr", value: "\(repository)#\(number)")
+        ExternalReference(kind: "github.pr", value: "\(repository.lowercased())#\(number)")
     }
 
     /// One agent session, namespaced by provider (e.g. `claude`).
@@ -24,8 +24,15 @@ struct ExternalReference: Hashable, Sendable, Codable {
         ExternalReference(kind: "fs.directory", value: path)
     }
 
+    /// A branch in a repository. `repository` is `github.com/owner/name` when the repository is
+    /// on GitHub (so local sessions and pull requests agree), otherwise a local path.
     static func branch(_ name: String, repository: String) -> ExternalReference {
-        ExternalReference(kind: "git.branch", value: "\(repository)@\(name)")
+        ExternalReference(kind: "git.branch", value: "\(repository.lowercased())@\(name)")
+    }
+
+    /// Canonical repository identity for a GitHub `owner/name`.
+    static func gitHubRepository(_ nameWithOwner: String) -> String {
+        "github.com/\(nameWithOwner)"
     }
 }
 
@@ -45,6 +52,8 @@ struct ObservedEvent: Hashable, Sendable {
     /// Whether an event that matches no existing workstream may start one. Events that only
     /// close something (e.g. a session ending) should not create work.
     let allowsNewWorkstream: Bool
+    /// Pull request this event belongs to; attached to the workstream if it has none yet.
+    let pullRequest: PullRequestReference?
 
     init(
         id: EventID,
@@ -55,7 +64,8 @@ struct ObservedEvent: Hashable, Sendable {
         references: [ExternalReference],
         suggestedTitle: String? = nil,
         workstreamKey: ExternalReference? = nil,
-        allowsNewWorkstream: Bool = true
+        allowsNewWorkstream: Bool = true,
+        pullRequest: PullRequestReference? = nil
     ) {
         self.id = id
         self.source = source
@@ -66,6 +76,7 @@ struct ObservedEvent: Hashable, Sendable {
         self.suggestedTitle = suggestedTitle
         self.workstreamKey = workstreamKey
         self.allowsNewWorkstream = allowsNewWorkstream
+        self.pullRequest = pullRequest
     }
 
     func linked(to workstreamID: WorkstreamID) -> WorkEvent {

@@ -135,6 +135,20 @@ func gitExecutable() -> String? {
     return run("/usr/bin/xcode-select", ["-p"]) != nil ? "/usr/bin/git" : nil
 }
 
+/// `owner/name` for a GitHub remote URL (https or ssh), so sessions match pull requests.
+func gitHubRepository(_ remote: String) -> String? {
+    var path: Substring
+    if let range = remote.range(of: "github.com:") ?? remote.range(of: "github.com/") {
+        path = remote[range.upperBound...]
+    } else {
+        return nil
+    }
+    if path.hasSuffix(".git") { path = path.dropLast(4) }
+    let parts = path.split(separator: "/")
+    guard parts.count == 2 else { return nil }
+    return "\(parts[0])/\(parts[1])"
+}
+
 var forwarded: [String: Any] = [:]
 for field in forwardedFields {
     if let value = payload[field] as? String { forwarded[field] = String(value.prefix(512)) }
@@ -148,6 +162,9 @@ forwarded["tern_ts"] = Int64(Date().timeIntervalSince1970 * 1000)
 if let cwd = payload["cwd"] as? String, event != "SessionEnd", let git = gitExecutable() {
     if let root = run(git, ["-C", cwd, "rev-parse", "--show-toplevel"]) {
         forwarded["tern_git_root"] = root
+        if let remote = run(git, ["-C", cwd, "remote", "get-url", "origin"]).flatMap(gitHubRepository) {
+            forwarded["tern_git_remote"] = remote
+        }
         if let branch = run(git, ["-C", cwd, "symbolic-ref", "--short", "-q", "HEAD"]) {
             forwarded["tern_git_branch"] = branch
         } else if let head = run(git, ["-C", cwd, "rev-parse", "--short", "HEAD"]) {

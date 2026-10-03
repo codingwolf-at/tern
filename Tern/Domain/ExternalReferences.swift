@@ -10,8 +10,18 @@ struct PlaneItemReference: Hashable, Sendable, Codable {
 }
 
 struct PullRequestReference: Hashable, Sendable, Codable {
+    /// `owner/name`.
     let repository: String
     let number: Int
+    var title: String?
+    var url: URL?
+
+    init(repository: String, number: Int, title: String? = nil, url: URL? = nil) {
+        self.repository = repository
+        self.number = number
+        self.title = title
+        self.url = url
+    }
 
     var label: String { "PR #\(number)" }
 }
