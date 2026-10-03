@@ -21,11 +21,15 @@ struct WorkstreamFacts: Hashable, Sendable {
     }
 
     /// One agent session. Sessions are tracked independently; a new session never
-    /// erases what an earlier one produced.
+    /// erases what an earlier one produced. A session hosts many turns; `status`
+    /// describes the latest turn, and `isEnded` whether the session itself has closed.
     struct AgentRun: Hashable, Sendable {
         enum Status: Hashable, Sendable {
+            /// Open, but no turn has run yet.
+            case idle
             case working
             case needsInput(prompt: String?)
+            /// The turn finished and handed control back to the user.
             case finished
             case failed(reason: String?)
         }
@@ -33,16 +37,18 @@ struct WorkstreamFacts: Hashable, Sendable {
         let sessionID: String
         var name: String
         var status: Status
-        /// When the current run began. Resuming a run that is still in progress keeps it.
+        /// When the current turn began. Resuming a turn that is still in progress keeps it.
         var started: Stamp
         var updated: Stamp
-        /// Set once the user has picked up a finished run's output.
+        /// Set once the user has picked up the turn's outcome.
         var isAcknowledged = false
+        /// The session has closed. Its history stays; it no longer claims anything.
+        var isEnded = false
 
         var isInProgress: Bool {
             switch status {
-            case .working, .needsInput: true
-            case .finished, .failed: false
+            case .working, .needsInput: !isEnded
+            case .idle, .finished, .failed: false
             }
         }
 
@@ -104,13 +110,16 @@ struct WorkstreamFacts: Hashable, Sendable {
         }
     }
 
-    /// Whether an agent run that began after `stamp` has taken on (or finished) the work.
-    /// Failed runs do not count: the requested work was not done.
+    /// Whether an agent turn that began after `stamp` has taken on (or finished) the work.
+    /// Failed turns and sessions closed mid-turn do not count: the requested work was not done.
     func isAddressedByAgent(after stamp: Stamp) -> Bool {
         agentRuns.values.contains { run in
             guard Stamp.isOrderedBefore(stamp, run.started) else { return false }
-            if case .failed = run.status { return false }
-            return true
+            switch run.status {
+            case .finished: return true
+            case .working, .needsInput: return run.isInProgress
+            case .idle, .failed: return false
+            }
         }
     }
 
@@ -152,14 +161,30 @@ struct WorkstreamFacts: Hashable, Sendable {
         case .pullRequestClosed:
             complete(stamp, reason: "Closed")
 
+        case .agentSessionOpened:
+            // Registers the session only. Also fires mid-turn (e.g. after compaction),
+            // so it never changes the state of a session that is already known.
+            if agentRuns[sessionID(for: event)] == nil {
+                updateRun(for: event, stamp: stamp, status: .idle)
+            }
         case .agentStarted:
             updateRun(for: event, stamp: stamp, status: .working)
         case .agentNeedsInput:
             updateRun(for: event, stamp: stamp, status: .needsInput(prompt: event[.prompt]))
+        case .agentResumed:
+            if let run = agentRuns[sessionID(for: event)], case .needsInput = run.status {
+                updateRun(for: event, stamp: stamp, status: .working)
+            }
         case .agentCompleted:
             updateRun(for: event, stamp: stamp, status: .finished)
         case .agentFailed:
             updateRun(for: event, stamp: stamp, status: .failed(reason: event[.reason]))
+        case .agentSessionEnded:
+            // Closing the session is the user's own action: whatever it last produced has been seen.
+            let id = sessionID(for: event)
+            agentRuns[id]?.isEnded = true
+            agentRuns[id]?.isAcknowledged = true
+            if agentRuns[id] != nil { agentRuns[id]?.updated = stamp }
 
         default:
             // Unknown or context-only kinds (e.g. calendar) do not change ownership.
@@ -167,14 +192,19 @@ struct WorkstreamFacts: Hashable, Sendable {
         }
     }
 
+    private func sessionID(for event: WorkEvent) -> String {
+        event[.agentSessionID] ?? event[.agentName] ?? "agent"
+    }
+
     private mutating func updateRun(for event: WorkEvent, stamp: Stamp, status: AgentRun.Status) {
-        let sessionID = event[.agentSessionID] ?? event[.agentName] ?? "agent"
+        let sessionID = sessionID(for: event)
         if var run = agentRuns[sessionID] {
-            // A start on a run that is already in progress is a resume, not a new run.
-            let isNewRun = status == .working && !run.isInProgress
-            if isNewRun {
+            // A start on a turn that is already in progress is a resume, not a new turn.
+            let isNewTurn = status == .working && !run.isInProgress
+            if isNewTurn {
                 run.started = stamp
                 run.isAcknowledged = false
+                run.isEnded = false
             }
             run.name = event[.agentName] ?? run.name
             run.status = status

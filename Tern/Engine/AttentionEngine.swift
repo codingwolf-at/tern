@@ -60,11 +60,16 @@ struct AttentionEngine: Sendable {
     }
 
     private static func session(from run: WorkstreamFacts.AgentRun) -> AgentSession {
-        let status: AgentSession.Status = switch run.status {
-        case .working: .working
-        case .needsInput: .needsInput
-        case .finished: .completed
-        case .failed: .failed
+        let status: AgentSession.Status = if run.isEnded {
+            .ended
+        } else {
+            switch run.status {
+            case .idle: .idle
+            case .working: .working
+            case .needsInput: .needsInput
+            case .finished: .completed
+            case .failed: .failed
+            }
         }
         return AgentSession(id: run.sessionID, agentName: run.name, status: status, startedAt: run.started.at, updatedAt: run.updated.at)
     }

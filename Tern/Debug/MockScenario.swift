@@ -153,7 +153,7 @@ struct MockScenario: Sendable {
             .agent,
             kind,
             minutesAgo,
-            [.agentSession(session), .branch(branch, repository: Self.repository)],
+            [.agentSession(provider: "claude", id: session), .branch(branch, repository: Self.repository)],
             [.agentName: "Claude Code", .agentSessionID: session]
         )
     }

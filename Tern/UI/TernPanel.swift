@@ -28,6 +28,10 @@ struct TernPanel: View {
             .frame(maxHeight: 460)
 
             #if DEBUG
+            Divider()
+            ClaudeDiagnosticsView(receiver: model.claudeHooks, workstreams: model.workstreams)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             if let player = model.scenarioPlayer {
                 Divider()
                 ScenarioControls(player: player)

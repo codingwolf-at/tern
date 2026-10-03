@@ -198,8 +198,15 @@ struct AttentionEngineTests {
         let evaluation = engine.evaluate(fixture.events)
         #expect(evaluation.decision.nextOwner == .me)
         #expect(evaluation.decision.attention == .high)
-        #expect(evaluation.decision.nextAction?.title == "Address requested changes")
-        #expect(evaluation.transition.causeID == feedback.id)
+        #expect(WorkstreamFacts(events: fixture.events).isAddressedByAgent(after: .init(feedback.linked(to: EventFixture.workstreamID))) == false)
+
+        // The feedback is still pending once the failure has been dealt with: starting a
+        // new turn that also gets closed without finishing leaves it outstanding.
+        fixture.add(.agentSessionEnded, from: .agent, EventFixture.claude())
+        let afterEnd = engine.evaluate(fixture.events)
+        #expect(afterEnd.decision.attention == .high)
+        #expect(afterEnd.decision.nextAction?.title == "Address requested changes")
+        #expect(afterEnd.transition.causeID == feedback.id)
     }
 
     @Test("Agent needing input is high attention for me")
@@ -212,7 +219,7 @@ struct AttentionEngineTests {
         #expect(evaluation.decision.nextOwner == .me)
         #expect(evaluation.decision.attention == .high)
         #expect(evaluation.decision.state == .needsAttention)
-        #expect(evaluation.status.headline == "Claude needs input")
+        #expect(evaluation.status.headline == "Claude needs your input")
         #expect(evaluation.status.detail == "Allow running migrations?")
         #expect(notifiesOnLastEvent(fixture))
 

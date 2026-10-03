@@ -15,8 +15,9 @@ struct ExternalReference: Hashable, Sendable, Codable {
         ExternalReference(kind: "github.pr", value: "\(repository)#\(number)")
     }
 
-    static func agentSession(_ id: String) -> ExternalReference {
-        ExternalReference(kind: "agent.session", value: id)
+    /// One agent session, namespaced by provider (e.g. `claude`).
+    static func agentSession(provider: String, id: String) -> ExternalReference {
+        ExternalReference(kind: "agent.session", value: "\(provider):\(id)")
     }
 
     static func workingDirectory(_ path: String) -> ExternalReference {
@@ -39,6 +40,11 @@ struct ObservedEvent: Hashable, Sendable {
     let references: [ExternalReference]
     /// Title to use if this event starts a new workstream.
     let suggestedTitle: String?
+    /// Reference that names a new workstream if this event creates one. Defaults to the first reference.
+    let workstreamKey: ExternalReference?
+    /// Whether an event that matches no existing workstream may start one. Events that only
+    /// close something (e.g. a session ending) should not create work.
+    let allowsNewWorkstream: Bool
 
     init(
         id: EventID,
@@ -47,7 +53,9 @@ struct ObservedEvent: Hashable, Sendable {
         timestamp: Date,
         metadata: [MetadataKey: String] = [:],
         references: [ExternalReference],
-        suggestedTitle: String? = nil
+        suggestedTitle: String? = nil,
+        workstreamKey: ExternalReference? = nil,
+        allowsNewWorkstream: Bool = true
     ) {
         self.id = id
         self.source = source
@@ -56,6 +64,8 @@ struct ObservedEvent: Hashable, Sendable {
         self.metadata = Dictionary(uniqueKeysWithValues: metadata.map { ($0.key.rawValue, $0.value) })
         self.references = references
         self.suggestedTitle = suggestedTitle
+        self.workstreamKey = workstreamKey
+        self.allowsNewWorkstream = allowsNewWorkstream
     }
 
     func linked(to workstreamID: WorkstreamID) -> WorkEvent {

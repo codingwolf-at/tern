@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7E000000000000000000000A /* tern-hook in Embed Helpers */ = {isa = PBXBuildFile; fileRef = 7E0000000000000000000008 /* tern-hook */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		7E0000000000000000000030 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -14,11 +18,33 @@
 			remoteGlobalIDString = 7E0000000000000000000010;
 			remoteInfo = Tern;
 		};
+		7E0000000000000000000032 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7E0000000000000000000070;
+			remoteInfo = TernHook;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7E0000000000000000000014 /* Embed Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				7E000000000000000000000A /* tern-hook in Embed Helpers */,
+			);
+			name = "Embed Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7E0000000000000000000004 /* Tern.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tern.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E0000000000000000000005 /* TernTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TernTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E0000000000000000000008 /* tern-hook */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "tern-hook"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -30,6 +56,11 @@
 		7E0000000000000000000007 /* TernTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TernTests;
+			sourceTree = "<group>";
+		};
+		7E0000000000000000000009 /* TernHook */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TernHook;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -49,6 +80,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E0000000000000000000072 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -57,6 +95,7 @@
 			children = (
 				7E0000000000000000000006 /* Tern */,
 				7E0000000000000000000007 /* TernTests */,
+				7E0000000000000000000009 /* TernHook */,
 				7E0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -66,6 +105,7 @@
 			children = (
 				7E0000000000000000000004 /* Tern.app */,
 				7E0000000000000000000005 /* TernTests.xctest */,
+				7E0000000000000000000008 /* tern-hook */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -80,10 +120,12 @@
 				7E0000000000000000000011 /* Sources */,
 				7E0000000000000000000012 /* Frameworks */,
 				7E0000000000000000000013 /* Resources */,
+				7E0000000000000000000014 /* Embed Helpers */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7E0000000000000000000033 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7E0000000000000000000006 /* Tern */,
@@ -118,6 +160,27 @@
 			productReference = 7E0000000000000000000005 /* TernTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		7E0000000000000000000070 /* TernHook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E0000000000000000000080 /* Build configuration list for PBXNativeTarget "TernHook" */;
+			buildPhases = (
+				7E0000000000000000000071 /* Sources */,
+				7E0000000000000000000072 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7E0000000000000000000009 /* TernHook */,
+			);
+			name = TernHook;
+			packageProductDependencies = (
+			);
+			productName = "tern-hook";
+			productReference = 7E0000000000000000000008 /* tern-hook */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -134,6 +197,9 @@
 					7E0000000000000000000020 = {
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = 7E0000000000000000000010;
+					};
+					7E0000000000000000000070 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -153,6 +219,7 @@
 			targets = (
 				7E0000000000000000000010 /* Tern */,
 				7E0000000000000000000020 /* TernTests */,
+				7E0000000000000000000070 /* TernHook */,
 			);
 		};
 /* End PBXProject section */
@@ -189,6 +256,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E0000000000000000000071 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -196,6 +270,11 @@
 			isa = PBXTargetDependency;
 			target = 7E0000000000000000000010 /* Tern */;
 			targetProxy = 7E0000000000000000000030 /* PBXContainerItemProxy */;
+		};
+		7E0000000000000000000033 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7E0000000000000000000070 /* TernHook */;
+			targetProxy = 7E0000000000000000000032 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -265,6 +344,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Tern-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Tern;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
@@ -293,6 +373,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Tern-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Tern;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
@@ -340,6 +421,28 @@
 			};
 			name = Release;
 		};
+		7E0000000000000000000081 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_NAME = "tern-hook";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		7E0000000000000000000082 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_NAME = "tern-hook";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -366,6 +469,15 @@
 			buildConfigurations = (
 				7E0000000000000000000061 /* Debug */,
 				7E0000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7E0000000000000000000080 /* Build configuration list for PBXNativeTarget "TernHook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E0000000000000000000081 /* Debug */,
+				7E0000000000000000000082 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

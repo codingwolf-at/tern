@@ -13,7 +13,8 @@ struct IngestReport: Hashable, Sendable {
     var accepted: [EventID] = []
     /// Events whose ID was already seen, either earlier or within the same batch.
     var duplicates: [EventID] = []
-    /// Events with no references, which cannot be linked to any workstream.
+    /// Events that could not be linked: no references, or no match for an event
+    /// that is not allowed to start a workstream.
     var unlinked: [EventID] = []
     var createdWorkstreams: [WorkstreamID] = []
     var notifications: [NotificationRecord] = []
@@ -135,14 +136,20 @@ actor IngestionService {
             let workstreamID: WorkstreamID
             if let resolved = nextResolver.resolve(observed.references) {
                 workstreamID = resolved
+            } else if observed.allowsNewWorkstream {
+                let key = observed.workstreamKey ?? observed.references[0]
+                workstreamID = Self.newWorkstreamID(for: key)
+                if !next.workstreams.contains(where: { $0.id == workstreamID }) {
+                    next.workstreams.append(WorkstreamRecord(
+                        id: workstreamID,
+                        title: observed.suggestedTitle ?? key.value,
+                        events: []
+                    ))
+                    report.createdWorkstreams.append(workstreamID)
+                }
             } else {
-                workstreamID = Self.newWorkstreamID(for: observed.references[0])
-                next.workstreams.append(WorkstreamRecord(
-                    id: workstreamID,
-                    title: observed.suggestedTitle ?? observed.references[0].value,
-                    events: []
-                ))
-                report.createdWorkstreams.append(workstreamID)
+                report.unlinked.append(observed.id)
+                continue
             }
             nextResolver.link(observed.references, to: workstreamID)
             guard let index = next.workstreams.firstIndex(where: { $0.id == workstreamID }) else { continue }

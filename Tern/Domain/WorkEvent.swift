@@ -59,11 +59,15 @@ extension WorkEventKind {
     static let pullRequestMerged = WorkEventKind(rawValue: "github.pr.merged")
     static let pullRequestClosed = WorkEventKind(rawValue: "github.pr.closed")
 
-    // Agents
+    // Agents. A session hosts many turns: `agentStarted` begins a turn, `agentCompleted`
+    // and `agentFailed` end one, and the session itself stays open until `agentSessionEnded`.
+    static let agentSessionOpened = WorkEventKind(rawValue: "agent.session.opened")
     static let agentStarted = WorkEventKind(rawValue: "agent.session.started")
     static let agentNeedsInput = WorkEventKind(rawValue: "agent.session.needs_input")
+    static let agentResumed = WorkEventKind(rawValue: "agent.session.resumed")
     static let agentCompleted = WorkEventKind(rawValue: "agent.session.completed")
     static let agentFailed = WorkEventKind(rawValue: "agent.session.failed")
+    static let agentSessionEnded = WorkEventKind(rawValue: "agent.session.ended")
 
     // Calendar
     static let calendarEventScheduled = WorkEventKind(rawValue: "calendar.event.scheduled")

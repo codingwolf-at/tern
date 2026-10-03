@@ -9,6 +9,8 @@ import os
 final class AppModel {
     private(set) var workstreams: [Workstream] = []
     private(set) var errorMessage: String?
+    /// Entry point for Claude Code hook events. Owned here so diagnostics can observe it.
+    let claudeHooks: ClaudeHookReceiver
 
     #if DEBUG
     /// Present only when running the mock scenario.
@@ -21,21 +23,25 @@ final class AppModel {
     #if DEBUG
     init(service: IngestionService, scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
+        self.claudeHooks = ClaudeHookReceiver(service: service)
         self.scenarioPlayer = scenarioPlayer
         observe()
     }
     #else
     init(service: IngestionService) {
         self.service = service
+        self.claudeHooks = ClaudeHookReceiver(service: service)
         observe()
     }
     #endif
 
-    /// DEBUG builds run the in-memory mock scenario; release builds load persisted state.
+    /// DEBUG builds run in memory with the mock scenario (set `TERN_MOCK=0` to start empty and
+    /// see only real Claude Code sessions); release builds load persisted state.
     static func makeDefault() -> AppModel {
         #if DEBUG
         let service = IngestionService(store: InMemoryTernStore())
-        return AppModel(service: service, scenarioPlayer: ScenarioPlayer(service: service))
+        let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
+        return AppModel(service: service, scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil)
         #else
         do {
             return AppModel(service: IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL())))

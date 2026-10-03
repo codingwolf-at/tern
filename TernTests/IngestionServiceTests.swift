@@ -59,7 +59,7 @@ struct IngestionServiceTests {
     @Test("Events resolve to a workstream through their references, and links are learned")
     func resolvesThroughReferences() async throws {
         let service = try await makeService()
-        let session = ExternalReference.agentSession("s1")
+        let session = ExternalReference.agentSession(provider: "claude", id: "s1")
         let start = ObservedEvent(
             id: EventID(.agent, "session", "s1", "start"), source: .agent, kind: .agentStarted,
             timestamp: EventFixture.origin, metadata: EventFixture.claude(), references: [session, EventFixture.reference]

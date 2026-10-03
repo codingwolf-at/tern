@@ -18,10 +18,16 @@ struct PullRequestReference: Hashable, Sendable, Codable {
 
 struct AgentSession: Identifiable, Hashable, Sendable, Codable {
     enum Status: String, Hashable, Sendable, Codable {
+        /// Session open, no turn running and nothing new to review.
+        case idle
         case working
         case needsInput
+        /// Last turn finished and returned control to the user.
         case completed
+        /// Last turn ended with an error.
         case failed
+        /// The session itself has closed.
+        case ended
     }
 
     let id: String

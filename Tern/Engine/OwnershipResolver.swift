@@ -4,13 +4,15 @@ import Foundation
 ///
 /// Rules, in order:
 /// 1. Completed work is silent and owned by nobody.
-/// 2. Anything that is the user's turn wins (agent needs input, CI failure, review feedback,
-///    finished or failed agent run, approval ready to merge). Review/CI feedback counts as
-///    handled while an agent run that started *after* it is in progress or has finished;
-///    a failed run does not handle it. Loudest claim wins; ties go to the newest.
+/// 2. Anything that is the user's turn wins (agent needs input or failed, CI failure, review
+///    feedback, finished agent turn, approval ready to merge). Review/CI feedback counts as
+///    handled while an agent turn that started *after* it is in progress or has finished;
+///    a failed turn does not handle it. Closed sessions claim nothing. Loudest claim wins;
+///    ties go to the newest.
 /// 3. Externally blocked work is owned by `external`.
 /// 4. Otherwise the ball is with an agent, CI, or a reviewer, in that order, and stays silent.
 /// 5. With nothing pending, an open PR or Plane item is a low-priority nudge for the user.
+/// 6. An open or closed agent session with nothing pending is owned by nobody.
 ///
 /// Every resolution names the event that caused it, which makes the result's
 /// `AttentionTransition` stable across replays.
@@ -67,7 +69,7 @@ struct OwnershipResolver: Sendable {
             )
         }
 
-        let working = facts.orderedAgentRuns.filter { $0.status == .working }
+        let working = facts.orderedAgentRuns.filter { $0.status == .working && $0.isInProgress }
         if let latest = working.last {
             let headline = working.count == 1 ? "\(latest.shortName) working" : "\(working.count) agents working"
             return waiting(on: .agent, state: .active, StatusLine(headline: headline, focus: .agent), latest.started)
@@ -98,6 +100,18 @@ struct OwnershipResolver: Sendable {
                 nextAction: NextAction(title: "Start work", reason: "Work item is ready to pick up"),
                 status: StatusLine(headline: "Ready to start", focus: .plane),
                 cause: created
+            )
+        }
+
+        if let latest = facts.orderedAgentRuns.max(by: { Stamp.isOrderedBefore($0.updated, $1.updated) }) {
+            let headline = latest.isEnded ? "\(latest.shortName) session ended" : "\(latest.shortName) idle"
+            return Resolution(
+                state: .active,
+                owner: .none,
+                attention: .silent,
+                nextAction: nil,
+                status: StatusLine(headline: headline, focus: .agent),
+                cause: latest.updated
             )
         }
 
@@ -166,14 +180,14 @@ struct OwnershipResolver: Sendable {
             break
         }
 
-        for run in facts.orderedAgentRuns {
+        for run in facts.orderedAgentRuns where !run.isEnded {
             switch run.status {
             case .needsInput(let prompt):
                 claims.append(Claim(
                     attention: .high,
                     cause: run.updated,
                     action: NextAction(title: "Answer \(run.shortName)", reason: "\(run.name) is waiting for input", estimatedMinutes: 2),
-                    status: StatusLine(headline: "\(run.shortName) needs input", detail: prompt, focus: .agent)
+                    status: StatusLine(headline: "\(run.shortName) needs your input", detail: prompt, focus: .agent)
                 ))
             case .finished where !run.isAcknowledged:
                 claims.append(Claim(
@@ -182,14 +196,14 @@ struct OwnershipResolver: Sendable {
                     action: NextAction(title: "Review \(run.shortName)'s changes", reason: "\(run.name) finished its run", estimatedMinutes: 10),
                     status: StatusLine(headline: "\(run.shortName) finished", focus: .agent)
                 ))
-            case .failed(let reason):
+            case .failed(let reason) where !run.isAcknowledged:
                 claims.append(Claim(
-                    attention: .medium,
+                    attention: .high,
                     cause: run.updated,
                     action: NextAction(title: "Check on \(run.shortName)", reason: reason ?? "\(run.name) stopped before finishing", estimatedMinutes: 5),
                     status: StatusLine(headline: "\(run.shortName) stopped", detail: reason, focus: .agent)
                 ))
-            case .working, .finished:
+            case .idle, .working, .finished, .failed:
                 break
             }
         }
