@@ -27,10 +27,14 @@ struct TernPanel: View {
             .scrollIndicators(.never)
             .frame(maxHeight: 460)
 
-            Divider()
-            ScenarioControls(model: model)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+            #if DEBUG
+            if let player = model.scenarioPlayer {
+                Divider()
+                ScenarioControls(player: player)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+            }
+            #endif
             Divider()
             footer
                 .padding(.horizontal, 16)
@@ -107,9 +111,15 @@ struct TernPanel: View {
 
     private var footer: some View {
         HStack {
-            Text("Quiet unless it's your turn")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if let error = model.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else {
+                Text("Quiet unless it's your turn")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)

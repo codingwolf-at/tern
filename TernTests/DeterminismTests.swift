@@ -7,17 +7,21 @@ struct DeterminismTests {
     let engine = AttentionEngine()
 
     private var history: [WorkEvent] {
+        observedHistory.map { $0.linked(to: EventFixture.workstreamID) }
+    }
+
+    private var observedHistory: [ObservedEvent] {
         var fixture = EventFixture()
         fixture.add(.planeItemCreated, from: .plane)
         fixture.add(.pullRequestOpened, from: .github)
         fixture.add(.reviewRequested, from: .github, [.reviewer: "Priya"])
         fixture.add(.changesRequested, from: .github, [.reviewer: "Priya", .commentCount: "3"])
-        fixture.add(.agentStarted, from: .agent, EventFixture.claude)
-        fixture.add(.agentCompleted, from: .agent, EventFixture.claude)
+        fixture.add(.agentStarted, from: .agent, EventFixture.claude())
+        fixture.add(.agentCompleted, from: .agent, EventFixture.claude())
         fixture.add(.ciStarted, from: .github)
         fixture.add(.ciPassed, from: .github)
         fixture.add(.reviewerResponded, from: .github, [.reviewer: "Priya", .commentCount: "2"])
-        return fixture.events
+        return fixture.observed
     }
 
     @Test("Ownership follows the expected sequence of transitions")
@@ -43,15 +47,35 @@ struct DeterminismTests {
         #expect(engine.evaluate(events.shuffled(using: &generator)) == engine.evaluate(events))
     }
 
-    @Test("Ingesting events one by one matches evaluating the whole history")
-    func incrementalMatchesBatch() {
-        let events = history
-        var workstream = Workstream(id: events[0].workstreamID, title: "Test")
-        for event in events {
-            workstream = engine.ingest(event, into: workstream)
+    @Test("Ingesting events one by one matches ingesting them as one batch")
+    func incrementalMatchesBatch() async throws {
+        let observed = observedHistory
+        let oneByOne = try await makeService()
+        for event in observed {
+            try await oneByOne.ingest([event])
         }
-        #expect(workstream.evaluation == engine.evaluate(events))
-        #expect(workstream.agentSessions.map(\.status) == [.completed])
+        let batched = try await makeService()
+        try await batched.ingest(observed)
+
+        let lhs = try #require(await oneByOne.workstream())
+        let rhs = try #require(await batched.workstream())
+        #expect(lhs.evaluation.transition == rhs.evaluation.transition)
+        #expect(lhs.evaluation.decision.with(shouldNotify: false) == rhs.evaluation.decision.with(shouldNotify: false))
+        #expect(lhs.evaluation.with(shouldNotify: false) == engine.evaluate(history))
+        #expect(lhs.agentSessions.map(\.status) == [.completed])
+    }
+
+    @Test("The same history always produces the same transition fingerprint")
+    func stableFingerprint() {
+        #expect(engine.evaluate(history).transition.fingerprint == engine.evaluate(history.reversed()).transition.fingerprint)
+    }
+}
+
+private extension WorkstreamEvaluation {
+    func with(shouldNotify: Bool) -> WorkstreamEvaluation {
+        var copy = self
+        copy.decision = decision.with(shouldNotify: shouldNotify)
+        return copy
     }
 }
 

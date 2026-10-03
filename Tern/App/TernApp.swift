@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct TernApp: App {
-    @State private var model = AppModel()
+    @State private var model = AppModel.makeDefault()
 
     var body: some Scene {
         MenuBarExtra {

@@ -25,11 +25,13 @@ struct WorkstreamEvaluation: Hashable, Sendable, Codable {
     var decision: AttentionDecision
     var status: StatusLine
     var lastMeaningfulChange: Date?
+    var transition: AttentionTransition
 
     static let initial = WorkstreamEvaluation(
         decision: .initial,
         status: StatusLine(headline: "No activity yet"),
-        lastMeaningfulChange: nil
+        lastMeaningfulChange: nil,
+        transition: .initial
     )
 }
 
@@ -40,6 +42,7 @@ struct Workstream: Identifiable, Hashable, Sendable {
     var planeItem: PlaneItemReference?
     var pullRequest: PullRequestReference?
     var agentSessions: [AgentSession]
+    /// Derived from calendar events; context only, never used for ownership.
     var calendarContext: CalendarContext?
     /// Event history in chronological order.
     var events: [WorkEvent]

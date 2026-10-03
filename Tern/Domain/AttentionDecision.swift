@@ -12,6 +12,9 @@ struct NextAction: Hashable, Sendable, Codable {
 }
 
 /// Deterministic result of evaluating a workstream.
+///
+/// `shouldNotify` is not derived from the event history: it is set by ingestion when newly
+/// observed data produces a transition the user has not been shown yet.
 struct AttentionDecision: Hashable, Sendable, Codable {
     let shouldNotify: Bool
     let state: WorkstreamState
@@ -27,6 +30,10 @@ struct AttentionDecision: Hashable, Sendable, Codable {
         attention: .silent,
         nextAction: nil
     )
+
+    func with(shouldNotify: Bool) -> AttentionDecision {
+        AttentionDecision(shouldNotify: shouldNotify, state: state, nextOwner: nextOwner, attention: attention, nextAction: nextAction)
+    }
 
     /// Whether two decisions differ in a way the user would care about (ignores `shouldNotify`).
     func isMeaningfullyDifferent(from other: AttentionDecision) -> Bool {

@@ -1,26 +1,51 @@
 import Foundation
 import Observation
+import os
 
-/// UI-facing state. Owns the store and engine and exposes workstreams grouped by whose turn it is.
+/// UI-facing state. Mirrors snapshots published by `IngestionService` and groups
+/// workstreams by whose turn it is. It does not ingest or evaluate anything itself.
 @MainActor
 @Observable
 final class AppModel {
     private(set) var workstreams: [Workstream] = []
-    /// How many events of the featured scenario have been played.
-    private(set) var scenarioStep: Int
+    private(set) var errorMessage: String?
 
-    let scenario: MockScenario
-    private let engine = AttentionEngine()
-    private let store: any WorkstreamStore
+    #if DEBUG
+    /// Present only when running the mock scenario.
+    let scenarioPlayer: ScenarioPlayer?
+    #endif
 
-    init(scenario: MockScenario = MockScenario()) {
-        self.scenario = scenario
-        self.scenarioStep = scenario.avatarMigrationScript.count
-        self.store = InMemoryWorkstreamStore()
-        Task { await load() }
+    private let service: IngestionService
+    private let logger = Logger(subsystem: "so.plane.tern", category: "app")
+
+    #if DEBUG
+    init(service: IngestionService, scenarioPlayer: ScenarioPlayer? = nil) {
+        self.service = service
+        self.scenarioPlayer = scenarioPlayer
+        observe()
     }
+    #else
+    init(service: IngestionService) {
+        self.service = service
+        observe()
+    }
+    #endif
 
-    var scenarioLength: Int { scenario.avatarMigrationScript.count }
+    /// DEBUG builds run the in-memory mock scenario; release builds load persisted state.
+    static func makeDefault() -> AppModel {
+        #if DEBUG
+        let service = IngestionService(store: InMemoryTernStore())
+        return AppModel(service: service, scenarioPlayer: ScenarioPlayer(service: service))
+        #else
+        do {
+            return AppModel(service: IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL())))
+        } catch {
+            let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
+            model.report(error)
+            return model
+        }
+        #endif
+    }
 
     // MARK: - Groupings
 
@@ -45,54 +70,28 @@ final class AppModel {
         workstreams.filter { $0.state == .complete }
     }
 
-    // MARK: - Loading
+    // MARK: - Service
 
-    func load() async {
-        if await store.loadAll().isEmpty {
-            var featured = scenario.avatarMigrationShell
-            featured.events = scenario.avatarMigrationScript
-            for workstream in [featured] + scenario.otherWorkstreams {
-                await store.save(engine.rebuild(workstream))
+    private func observe() {
+        Task { [weak self, service] in
+            do {
+                try await service.start()
+            } catch {
+                self?.report(error)
+                return
+            }
+            #if DEBUG
+            await self?.scenarioPlayer?.seed()
+            #endif
+            for await snapshot in service.updates {
+                guard let self else { return }
+                self.workstreams = snapshot.workstreams
             }
         }
-        workstreams = await store.loadAll()
     }
 
-    // MARK: - Scenario playback
-
-    /// Plays the next scripted event through the engine, as a live integration would.
-    func stepForward() {
-        guard scenarioStep < scenarioLength, let current = featured else { return }
-        let event = scenario.avatarMigrationScript[scenarioStep]
-        scenarioStep += 1
-        commit(engine.ingest(event, into: current))
-    }
-
-    func stepBackward() {
-        guard scenarioStep > 0 else { return }
-        replay(to: scenarioStep - 1)
-    }
-
-    func restartScenario() {
-        replay(to: 0)
-    }
-
-    private var featured: Workstream? {
-        workstreams.first { $0.id == MockScenario.avatarMigrationID }
-    }
-
-    private func replay(to step: Int) {
-        guard var current = featured else { return }
-        scenarioStep = step
-        current.events = Array(scenario.avatarMigrationScript.prefix(step))
-        current.calendarContext = nil
-        commit(engine.rebuild(current))
-    }
-
-    private func commit(_ workstream: Workstream) {
-        if let index = workstreams.firstIndex(where: { $0.id == workstream.id }) {
-            workstreams[index] = workstream
-        }
-        Task { await store.save(workstream) }
+    private func report(_ error: any Error) {
+        logger.error("Tern failed to load state: \(error)")
+        errorMessage = "Couldn't load saved state"
     }
 }

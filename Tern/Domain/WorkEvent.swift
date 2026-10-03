@@ -8,6 +8,27 @@ enum EventSource: String, Hashable, Sendable, Codable, CaseIterable {
     case calendar
 }
 
+/// Stable identity of an event, assigned by the integration that observed it.
+/// Seeing the same source event again must produce the same ID, e.g.
+/// `github:review:<review-id>` or `agent:session:<session-id>:stop:<sequence>`.
+/// Ingestion uses it to drop repeats from polling or replays.
+struct EventID: RawRepresentable, Hashable, Sendable, Codable, Comparable {
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    /// Builds an ID namespaced by source, e.g. `EventID(.github, "review", "123")` → `github:review:123`.
+    init(_ source: EventSource, _ components: String...) {
+        self.rawValue = ([source.rawValue] + components).joined(separator: ":")
+    }
+
+    static func < (lhs: EventID, rhs: EventID) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
 /// Open-ended event type. Integrations can declare new kinds in their own extensions
 /// without changing the core model; the engine ignores kinds it does not understand.
 struct WorkEventKind: RawRepresentable, Hashable, Sendable, Codable {
@@ -40,6 +61,7 @@ extension WorkEventKind {
 
     // Agents
     static let agentStarted = WorkEventKind(rawValue: "agent.session.started")
+    static let agentNeedsInput = WorkEventKind(rawValue: "agent.session.needs_input")
     static let agentCompleted = WorkEventKind(rawValue: "agent.session.completed")
     static let agentFailed = WorkEventKind(rawValue: "agent.session.failed")
 
@@ -47,9 +69,9 @@ extension WorkEventKind {
     static let calendarEventScheduled = WorkEventKind(rawValue: "calendar.event.scheduled")
 }
 
-/// A normalized event that happened within a workstream.
+/// A normalized event that has been linked to a workstream.
 struct WorkEvent: Identifiable, Hashable, Sendable, Codable {
-    let id: UUID
+    let id: EventID
     let workstreamID: WorkstreamID
     let source: EventSource
     let kind: WorkEventKind
@@ -57,7 +79,7 @@ struct WorkEvent: Identifiable, Hashable, Sendable, Codable {
     let metadata: [String: String]
 
     init(
-        id: UUID = UUID(),
+        id: EventID,
         workstreamID: WorkstreamID,
         source: EventSource,
         kind: WorkEventKind,
@@ -85,6 +107,7 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let commentCount = MetadataKey(rawValue: "commentCount")
     static let agentName = MetadataKey(rawValue: "agentName")
     static let agentSessionID = MetadataKey(rawValue: "agentSessionID")
+    static let prompt = MetadataKey(rawValue: "prompt")
     static let checkName = MetadataKey(rawValue: "checkName")
     static let reason = MetadataKey(rawValue: "reason")
     static let title = MetadataKey(rawValue: "title")
@@ -95,6 +118,6 @@ extension WorkEvent {
     /// Chronological order with a stable tie-break, so evaluation never depends on insertion order.
     static func chronological(_ lhs: WorkEvent, _ rhs: WorkEvent) -> Bool {
         if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
-        return lhs.id.uuidString < rhs.id.uuidString
+        return lhs.id < rhs.id
     }
 }

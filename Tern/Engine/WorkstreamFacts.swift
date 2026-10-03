@@ -1,55 +1,100 @@
 import Foundation
 
 /// Facts accumulated by folding a workstream's events in chronological order.
-/// Each fact keeps the timestamp it became true, so the engine can reason about
-/// which signals supersede which.
+/// Each fact keeps a `Stamp` of the event that established it, so the engine can reason
+/// about which signals supersede which and name the cause of its decision.
 struct WorkstreamFacts: Hashable, Sendable {
-    enum AgentActivity: Hashable, Sendable {
-        case idle
-        case working(name: String, since: Date)
-        case finished(name: String, startedAt: Date, at: Date)
-        case failed(name: String, startedAt: Date, at: Date, reason: String?)
+    /// The event a fact came from.
+    struct Stamp: Hashable, Sendable {
+        let id: EventID
+        let at: Date
 
-        /// When the agent's most recent run began, if any.
-        var startedAt: Date? {
-            switch self {
-            case .idle: nil
-            case .working(_, let since): since
-            case .finished(_, let startedAt, _), .failed(_, let startedAt, _, _): startedAt
+        init(_ event: WorkEvent) {
+            id = event.id
+            at = event.timestamp
+        }
+
+        /// Total order: by time, then by ID, so ties never depend on input order.
+        static func isOrderedBefore(_ lhs: Stamp, _ rhs: Stamp) -> Bool {
+            lhs.at != rhs.at ? lhs.at < rhs.at : lhs.id < rhs.id
+        }
+    }
+
+    /// One agent session. Sessions are tracked independently; a new session never
+    /// erases what an earlier one produced.
+    struct AgentRun: Hashable, Sendable {
+        enum Status: Hashable, Sendable {
+            case working
+            case needsInput(prompt: String?)
+            case finished
+            case failed(reason: String?)
+        }
+
+        let sessionID: String
+        var name: String
+        var status: Status
+        /// When the current run began. Resuming a run that is still in progress keeps it.
+        var started: Stamp
+        var updated: Stamp
+        /// Set once the user has picked up a finished run's output.
+        var isAcknowledged = false
+
+        var isInProgress: Bool {
+            switch status {
+            case .working, .needsInput: true
+            case .finished, .failed: false
             }
+        }
+
+        var shortName: String {
+            name.split(separator: " ").first.map(String.init) ?? name
         }
     }
 
     enum Review: Hashable, Sendable {
         case none
-        case awaiting(reviewer: String?, since: Date)
-        case changesRequested(reviewer: String?, comments: Int?, at: Date)
-        case responded(reviewer: String?, comments: Int?, at: Date)
-        case approved(reviewer: String?, at: Date)
-    }
-
-    struct Blocked: Hashable, Sendable {
-        let reason: String?
-        let since: Date
+        case awaiting(reviewer: String?, Stamp)
+        case changesRequested(reviewer: String?, comments: Int?, Stamp)
+        case responded(reviewer: String?, comments: Int?, Stamp)
+        case approved(reviewer: String?, Stamp)
     }
 
     enum CI: Hashable, Sendable {
         case unknown
-        case running(since: Date)
-        case passed(at: Date)
-        case failed(check: String?, at: Date)
+        case running(Stamp)
+        case passed(Stamp)
+        case failed(check: String?, Stamp)
     }
 
-    var hasPlaneItem = false
-    var hasPullRequest = false
-    var agent: AgentActivity = .idle
+    struct Blocked: Hashable, Sendable {
+        let reason: String?
+        let stamp: Stamp
+    }
+
+    struct Completion: Hashable, Sendable {
+        let reason: String
+        let stamp: Stamp
+    }
+
+    var planeItem: Stamp?
+    var pullRequest: Stamp?
+    /// Agent sessions keyed by session ID.
+    var agentRuns: [String: AgentRun] = [:]
     var review: Review = .none
     var ci: CI = .unknown
     var blocked: Blocked?
-    var completedAt: Date?
-    var completionReason: String?
+    var completion: Completion?
 
-    var isComplete: Bool { completedAt != nil }
+    var isComplete: Bool { completion != nil }
+
+    /// Sessions in a stable order (by start, then ID).
+    var orderedAgentRuns: [AgentRun] {
+        agentRuns.values.sorted { lhs, rhs in
+            lhs.started == rhs.started
+                ? lhs.sessionID < rhs.sessionID
+                : Stamp.isOrderedBefore(lhs.started, rhs.started)
+        }
+    }
 
     init() {}
 
@@ -59,48 +104,62 @@ struct WorkstreamFacts: Hashable, Sendable {
         }
     }
 
+    /// Whether an agent run that began after `stamp` has taken on (or finished) the work.
+    /// Failed runs do not count: the requested work was not done.
+    func isAddressedByAgent(after stamp: Stamp) -> Bool {
+        agentRuns.values.contains { run in
+            guard Stamp.isOrderedBefore(stamp, run.started) else { return false }
+            if case .failed = run.status { return false }
+            return true
+        }
+    }
+
     mutating func apply(_ event: WorkEvent) {
-        let at = event.timestamp
+        let stamp = Stamp(event)
         switch event.kind {
         case .planeItemCreated:
-            hasPlaneItem = true
+            planeItem = planeItem ?? stamp
         case .planeItemBlocked:
-            blocked = Blocked(reason: event[.reason], since: at)
+            blocked = Blocked(reason: event[.reason], stamp: stamp)
         case .planeItemUnblocked:
             blocked = nil
         case .planeItemCompleted:
-            complete(at: at, reason: "Marked done in Plane")
+            complete(stamp, reason: "Marked done in Plane")
 
         case .pullRequestOpened:
-            hasPullRequest = true
+            pullRequest = pullRequest ?? stamp
         case .reviewRequested:
-            review = .awaiting(reviewer: event[.reviewer], since: at)
+            review = .awaiting(reviewer: event[.reviewer], stamp)
         case .changesRequested:
-            review = .changesRequested(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, at: at)
+            review = .changesRequested(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, stamp)
         case .reviewerResponded:
-            review = .responded(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, at: at)
+            review = .responded(reviewer: event[.reviewer], comments: event[.commentCount].flatMap { Int($0) }, stamp)
         case .reviewApproved:
-            review = .approved(reviewer: event[.reviewer], at: at)
+            review = .approved(reviewer: event[.reviewer], stamp)
         case .commitsPushed:
-            // Pushing work means the user has picked up whatever the agent produced.
-            if case .finished = agent { agent = .idle }
+            // Pushing work means the user has picked up whatever the agents produced.
+            for (id, run) in agentRuns where run.status == .finished {
+                agentRuns[id]?.isAcknowledged = true
+            }
         case .ciStarted:
-            ci = .running(since: at)
+            ci = .running(stamp)
         case .ciPassed:
-            ci = .passed(at: at)
+            ci = .passed(stamp)
         case .ciFailed:
-            ci = .failed(check: event[.checkName], at: at)
+            ci = .failed(check: event[.checkName], stamp)
         case .pullRequestMerged:
-            complete(at: at, reason: "Merged")
+            complete(stamp, reason: "Merged")
         case .pullRequestClosed:
-            complete(at: at, reason: "Closed")
+            complete(stamp, reason: "Closed")
 
         case .agentStarted:
-            agent = .working(name: event[.agentName] ?? "Agent", since: at)
+            updateRun(for: event, stamp: stamp, status: .working)
+        case .agentNeedsInput:
+            updateRun(for: event, stamp: stamp, status: .needsInput(prompt: event[.prompt]))
         case .agentCompleted:
-            agent = .finished(name: event[.agentName] ?? agentName, startedAt: agent.startedAt ?? at, at: at)
+            updateRun(for: event, stamp: stamp, status: .finished)
         case .agentFailed:
-            agent = .failed(name: event[.agentName] ?? agentName, startedAt: agent.startedAt ?? at, at: at, reason: event[.reason])
+            updateRun(for: event, stamp: stamp, status: .failed(reason: event[.reason]))
 
         default:
             // Unknown or context-only kinds (e.g. calendar) do not change ownership.
@@ -108,17 +167,33 @@ struct WorkstreamFacts: Hashable, Sendable {
         }
     }
 
-    private var agentName: String {
-        switch agent {
-        case .idle: "Agent"
-        case .working(let name, _), .finished(let name, _, _), .failed(let name, _, _, _): name
+    private mutating func updateRun(for event: WorkEvent, stamp: Stamp, status: AgentRun.Status) {
+        let sessionID = event[.agentSessionID] ?? event[.agentName] ?? "agent"
+        if var run = agentRuns[sessionID] {
+            // A start on a run that is already in progress is a resume, not a new run.
+            let isNewRun = status == .working && !run.isInProgress
+            if isNewRun {
+                run.started = stamp
+                run.isAcknowledged = false
+            }
+            run.name = event[.agentName] ?? run.name
+            run.status = status
+            run.updated = stamp
+            agentRuns[sessionID] = run
+        } else {
+            agentRuns[sessionID] = AgentRun(
+                sessionID: sessionID,
+                name: event[.agentName] ?? "Agent",
+                status: status,
+                started: stamp,
+                updated: stamp
+            )
         }
     }
 
-    private mutating func complete(at: Date, reason: String) {
-        if completedAt == nil {
-            completedAt = at
-            completionReason = reason
+    private mutating func complete(_ stamp: Stamp, reason: String) {
+        if completion == nil {
+            completion = Completion(reason: reason, stamp: stamp)
         }
     }
 }

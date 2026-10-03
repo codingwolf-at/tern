@@ -19,6 +19,7 @@ struct PullRequestReference: Hashable, Sendable, Codable {
 struct AgentSession: Identifiable, Hashable, Sendable, Codable {
     enum Status: String, Hashable, Sendable, Codable {
         case working
+        case needsInput
         case completed
         case failed
     }
