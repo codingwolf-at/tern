@@ -5,6 +5,11 @@ import SwiftUI
 struct TernPanel: View {
     let model: AppModel
     @State private var expandedID: WorkstreamID?
+    /// Height of the scrolling content. A scroll view has no useful ideal height of its own,
+    /// so the menu bar window would otherwise size it to nothing.
+    @State private var contentHeight: CGFloat = 0
+
+    private static let maxListHeight: CGFloat = 460
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -36,9 +41,10 @@ struct TernPanel: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .scrollIndicators(.never)
-            .frame(maxHeight: 460)
+            .scrollIndicators(contentHeight > Self.maxListHeight ? .automatic : .never)
+            .frame(height: min(contentHeight, Self.maxListHeight))
 
             #if DEBUG
             Divider()
