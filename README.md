@@ -33,6 +33,7 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 - **Workstreams, not events.** A Plane work item, its pull request and the Claude Code sessions working on it are linked into one workstream.
 - **Ownership detection.** For each workstream Tern works out who holds the next action: you, an agent, a reviewer, CI, someone external, or nobody.
 - **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, low priority, muted). This is a ranking preference, separate from Personal/Professional contexts.
+- **Take me there.** Tern doesn't just tell you when it's your turn; it can take you directly to where the next action happens. Items that are yours get one button: **Open PR**, **Open in Plane** or **Join meeting**, plus the other destination when a PR and its Plane item are linked. Buttons only use links GitHub, Plane or the calendar event provided, and pressing one changes nothing in Tern; the item updates when the source system reports what you did. Agent sessions have no button, since answering Claude happens in its own terminal or editor.
 - **Panel sections.** *Needs you*, *Waiting*, *Active*, *Your other work*, *Done today* and *Idle*.
 - **Personal / Professional contexts.** Work is separated into two contexts; only the active one counts toward the queue and badge.
 - **Transition-based alerts.** Tern decides whether a change is worth surfacing by comparing it against what you were last shown, and marks genuinely new items in the panel.

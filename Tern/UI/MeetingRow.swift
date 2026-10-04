@@ -5,6 +5,8 @@ import SwiftUI
 /// the event carries a link; without one there is nothing to click through to.
 struct MeetingRow: View {
     let status: MeetingStatus
+    var actions: ItemActions = .none
+    var perform: @MainActor (ActionTarget) -> Void = { _ in }
 
     @State private var isHovering = false
 
@@ -45,8 +47,8 @@ struct MeetingRow: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                if needsYou, let action = status.decision.nextAction {
-                    actionLine(action)
+                if needsYou || status.phase == .inProgress {
+                    actionLine
                         .padding(.top, 3)
                 }
             }
@@ -56,18 +58,16 @@ struct MeetingRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isHovering && meeting.joinURL != nil ? AnyShapeStyle(.quaternary.opacity(0.6)) : AnyShapeStyle(.clear))
+                .fill(isHovering && actions.primary != nil ? AnyShapeStyle(.quaternary.opacity(0.6)) : AnyShapeStyle(.clear))
         )
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { isHovering = $0 }
-        .onTapGesture { if let url = meeting.joinURL { NSWorkspace.shared.open(url) } }
+        .onTapGesture { if let join = actions.primary { perform(join) } }
         .contextMenu {
-            if let url = meeting.joinURL {
-                Button("Join meeting") { NSWorkspace.shared.open(url) }
-            }
+            actions.menuItems(perform: perform)
             Button("Open Calendar") { Self.openCalendar() }
         }
-        .help(meeting.joinURL == nil ? "No meeting link in this event" : "Join meeting")
+        .help(actions.primary == nil ? "No meeting link in this event" : "Join meeting")
         .accessibilityElement(children: .combine)
     }
 
@@ -80,20 +80,19 @@ struct MeetingRow: View {
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// Join when the event carries a call link; otherwise the next action as plain text.
     @ViewBuilder
-    private func actionLine(_ action: NextAction) -> some View {
-        let label = HStack(spacing: 4) {
-            Image(systemName: meeting.joinURL == nil ? "arrow.turn.down.right" : "video.fill")
-                .font(.caption2.weight(.semibold))
-            Text(action.title)
-                .font(.caption.weight(.medium))
-        }
-        .foregroundStyle(status.decision.attention.tint)
-        if let url = meeting.joinURL {
-            Button { NSWorkspace.shared.open(url) } label: { label }
-                .buttonStyle(.plain)
-        } else {
-            label
+    private var actionLine: some View {
+        if actions.primary != nil {
+            ActionButtons(actions: actions, tint: status.decision.attention == .silent ? .accentColor : status.decision.attention.tint, perform: perform)
+        } else if let action = status.decision.nextAction {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.caption2.weight(.semibold))
+                Text(action.title)
+                    .font(.caption.weight(.medium))
+            }
+            .foregroundStyle(status.decision.attention.tint)
         }
     }
 

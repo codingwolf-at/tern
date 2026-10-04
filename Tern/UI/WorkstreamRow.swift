@@ -4,6 +4,8 @@ struct WorkstreamRow: View {
     let workstream: Workstream
     let isExpanded: Bool
     let toggle: () -> Void
+    var actions: ItemActions = .none
+    var perform: @MainActor (ActionTarget) -> Void = { _ in }
 
     @State private var isHovering = false
 
@@ -32,6 +34,10 @@ struct WorkstreamRow: View {
                 if isMyTurn, let action = workstream.nextAction {
                     NextActionLine(action: action, tint: workstream.attention.tint)
                         .padding(.top, 3)
+                }
+                if isMyTurn {
+                    ActionButtons(actions: actions, tint: workstream.attention == .silent ? .accentColor : workstream.attention.tint, perform: perform)
+                        .padding(.top, 2)
                 }
                 if isExpanded {
                     WorkstreamDetail(workstream: workstream)

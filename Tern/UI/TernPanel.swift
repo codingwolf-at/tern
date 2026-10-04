@@ -232,10 +232,10 @@ struct TernPanel: View {
         VStack(alignment: .leading, spacing: 2) {
             SectionHeader(title: "Up next")
             if let meeting = model.meetingInProgress {
-                MeetingRow(status: meeting)
+                MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) })
             }
             if let meeting = model.upNext {
-                MeetingRow(status: meeting)
+                MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) })
             }
         }
     }
@@ -258,14 +258,17 @@ struct TernPanel: View {
                         WorkstreamRow(
                             workstream: workstream,
                             isExpanded: expandedID == workstream.id,
-                            toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id }
+                            toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id },
+                            actions: model.actions(for: .workstream(workstream)),
+                            perform: { model.perform($0) }
                         )
                         .contextMenu {
+                            model.actions(for: .workstream(workstream)).menuItems { model.perform($0) }
                             importanceMenu(for: workstream)
                             if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
                         }
                     case .meeting(let meeting):
-                        MeetingRow(status: meeting)
+                        MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) })
                     }
                 }
             }
@@ -315,9 +318,7 @@ struct TernPanel: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
-            if let url = meeting.meeting.joinURL {
-                Button("Join meeting") { NSWorkspace.shared.open(url) }
-            }
+            model.actions(for: .meeting(meeting)).menuItems { model.perform($0) }
             Button("Open Calendar") { MeetingRow.openCalendar() }
         }
     }
@@ -345,6 +346,7 @@ struct TernPanel: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
+            model.actions(for: .workstream(workstream)).menuItems { model.perform($0) }
             importanceMenu(for: workstream)
             if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
         }

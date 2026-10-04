@@ -329,8 +329,9 @@ final class AppModel {
     func handle(_ response: NotificationResponder.Response) {
         switch response {
         case .join(let subject):
-            if let url = meetings.first(where: { $0.meeting.subjectID == subject })?.meeting.joinURL {
-                NSWorkspace.shared.open(url)
+            if let meeting = meetings.first(where: { $0.meeting.subjectID == subject }),
+               let join = actions(for: .meeting(meeting)).primary {
+                perform(join)
             } else {
                 focus(subject)
             }
@@ -342,6 +343,30 @@ final class AppModel {
     private func focus(_ subject: SubjectID) {
         focusedSubject = subject
         MenuBarPanel.shared.show()
+    }
+
+    // MARK: - Actions
+
+    /// Opens destinations; replaceable in tests so no browser is launched.
+    var router: any ActionRouter = SystemActionRouter()
+
+    /// Where an item's next move happens, if Tern knows a real destination for it.
+    func actions(for item: AttentionItem) -> ItemActions {
+        let subjectContext = switch item {
+        case .workstream(let workstream): context(of: workstream)
+        case .meeting(let meeting): meeting.context
+        }
+        return ActionResolver.actions(for: item, context: subjectContext)
+    }
+
+    /// Takes the user to an action's destination. Changes nothing in Tern: the work stays as it
+    /// is until the source system reports what the user did there. A target from outside the
+    /// active context is refused, so a stale row can't open the other context's work.
+    @discardableResult
+    func perform(_ target: ActionTarget) -> Bool {
+        guard !isContextScoped || target.context.isIn(activeContext) else { return false }
+        router.open(target.url)
+        return true
     }
 
     // MARK: - Service
