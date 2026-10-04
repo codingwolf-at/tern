@@ -41,6 +41,8 @@ actor PlaneSyncService {
     struct Status: Sendable, Equatable {
         enum Phase: Sendable, Equatable {
             case notConfigured
+            /// A workspace is saved but its token isn't in this build's Keychain namespace.
+            case missingToken
             case idle
             case syncing
             case invalidCredentials
@@ -139,7 +141,7 @@ actor PlaneSyncService {
     private func cycle() async -> TimeInterval {
         let result = await syncOnce()
         switch result.phase {
-        case .notConfigured, .invalidCredentials, .workspaceUnavailable:
+        case .notConfigured, .missingToken, .invalidCredentials, .workspaceUnavailable:
             return Self.maximumBackoff
         case .rateLimited(let until):
             return max(until.timeIntervalSince(now()), interval)
@@ -173,7 +175,7 @@ actor PlaneSyncService {
         } catch let error as PlaneAPIError {
             status.lastError = error.summary
             switch error {
-            case .notConnected: status.phase = .notConfigured
+            case .notConnected: status.phase = .missingToken
             case .invalidCredentials: status.phase = .invalidCredentials
             case .workspaceUnavailable: status.phase = .workspaceUnavailable
             case .rateLimited(let until): status.phase = .rateLimited(until: until)

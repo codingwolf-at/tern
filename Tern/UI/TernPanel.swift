@@ -111,6 +111,15 @@ struct TernPanel: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Tern")
                     .font(.system(.title3, design: .rounded, weight: .semibold))
+                if BuildEnvironment.current == .debug {
+                    Text("DEBUG")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.orange.opacity(0.15), in: Capsule())
+                        .help("A Debug build: its own state, Plane token and Calendar access, separate from the installed Tern.")
+                }
                 Spacer()
                 Text(summary)
                     .font(.callout)

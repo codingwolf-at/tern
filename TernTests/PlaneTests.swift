@@ -183,10 +183,10 @@ struct PlaneSyncTests {
         #expect(await h.workstream() != nil)
     }
 
-    @Test("Without a token the service is simply not configured")
+    @Test("A saved workspace without a token reports the missing token and makes no requests")
     func noToken() async throws {
         let h = try await PlaneHarness(token: nil)
-        #expect(await h.sync.syncOnce().phase == .notConfigured)
+        #expect(await h.sync.syncOnce().phase == .missingToken)
         #expect(h.plane.read { $0.listRequests } == 0)
     }
 }
@@ -525,5 +525,122 @@ struct CredentialIsolationTests {
             #expect(!visible.contains { $0.contains(secret) })
             #expect(!messages.contains { $0.contains(secret) })
         }
+    }
+
+    // MARK: Restart
+
+    private func wait(_ condition: () -> Bool) async throws {
+        for _ in 0..<300 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    /// A Plane account as the app builds it at launch: saved workspace in `defaults`, token in
+    /// the Keychain under this test's own namespace, Tern state in a JSON file.
+    private func launchIngestion(_ stateURL: URL) async throws -> IngestionService {
+        let ingestion = IngestionService(store: JSONFileTernStore(url: stateURL), now: { PL.t0 }, scoping: .ignoringContexts)
+        try await ingestion.start()
+        return ingestion
+    }
+
+    private func launch(_ ingestion: IngestionService, defaults: UserDefaults, plane: PlaneStub) -> PlaneAccount {
+        PlaneAccount(ingestion: ingestion, credentials: store(.debug), http: plane, defaults: defaults, startSyncing: false, now: { PL.t0 })
+    }
+
+    private func temporaryState() -> URL {
+        FileManager.default.temporaryDirectory.appending(path: "tern-plane-\(UUID().uuidString)/state.json")
+    }
+
+    @Test("Quit and relaunch: the Keychain token and saved workspace survive, and Plane reconnects without asking")
+    func relaunchKeepsConnection() async throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        let stateURL = temporaryState()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let plane = PlaneStub()
+        plane.update { $0.items = [PL.item(state: PL.todo)] }
+
+        let first = launch(try await launchIngestion(stateURL), defaults: defaults, plane: plane)
+        first.connect(workspace: "plane", token: "plane_api_valid_test_token")
+        try await wait { if case .connected(_, .some) = first.state { true } else { false } }
+        for _ in 0..<300 where defaults.data(forKey: "plane.workspace") == nil { try await Task.sleep(for: .milliseconds(10)) }
+
+        // Relaunch: new store objects reading the same Keychain item, defaults and state file.
+        let ingestion = try await launchIngestion(stateURL)
+        let second = launch(ingestion, defaults: defaults, plane: plane)
+        // Never "Not connected" while the saved workspace is being loaded.
+        #expect(second.state == .connected(workspace: "plane", user: nil))
+        #expect(try store(.debug).token(for: "plane") == "plane_api_valid_test_token")
+        second.refresh()
+        try await wait { second.state == .connected(workspace: "plane", user: "Atul") }
+        #expect(second.state == .connected(workspace: "plane", user: "Atul"))
+        // The import done before the restart still counts: nothing is re-announced.
+        #expect(await ingestion.snapshot.notifications.isEmpty)
+        #expect(await ingestion.snapshot.workstreams.contains { $0.planeItem != nil })
+    }
+
+    @Test("A temporary failure keeps the token and shows a problem, never 'Not connected'")
+    func temporaryFailure() async throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        defaults.set(try JSONEncoder().encode(PL.workspace), forKey: "plane.workspace")
+        try store(.debug).save("plane_api_valid_test_token", for: "plane")
+        let stateURL = temporaryState()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let plane = PlaneStub()
+        plane.update { $0.failure = .offline }
+
+        let account = launch(try await launchIngestion(stateURL), defaults: defaults, plane: plane)
+        account.refresh()
+        try await wait { if case .problem = account.state { true } else { false } }
+        #expect(account.state == .problem("Network: offline"))
+        #expect(try store(.debug).token(for: "plane") == "plane_api_valid_test_token")
+
+        // Back online: connected. Offline again after a successful sync: still connected, retrying.
+        plane.update { $0.failure = nil }
+        account.refresh()
+        try await wait { account.state == .connected(workspace: "plane", user: "Atul") }
+        plane.update { $0.failure = .offline }
+        account.refresh()
+        try await wait { account.sync.phase == .failing }
+        #expect(account.state == .connected(workspace: "plane", user: "Atul"))
+        #expect(try store(.debug).token(for: "plane") == "plane_api_valid_test_token")
+    }
+
+    @Test("An explicit 401 asks to reconnect, without deleting anything on its own")
+    func unauthorized() async throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        defaults.set(try JSONEncoder().encode(PL.workspace), forKey: "plane.workspace")
+        try store(.debug).save("plane_api_revoked_token", for: "plane")
+        let stateURL = temporaryState()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let plane = PlaneStub()
+        plane.update { $0.failure = .status(401) }
+
+        let account = launch(try await launchIngestion(stateURL), defaults: defaults, plane: plane)
+        account.refresh()
+        try await wait { account.state == .invalidCredentials(workspace: "plane") }
+        #expect(account.state == .invalidCredentials(workspace: "plane"))
+        #expect(try store(.debug).token(for: "plane") != nil)
+    }
+
+    @Test("No saved workspace is 'Not connected' from the start; a workspace without this build's token says so")
+    func notConnectedAndMissingToken() async throws {
+        defer { cleanUp() }
+        let stateURL = temporaryState()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let fresh = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        let empty = launch(try await launchIngestion(stateURL), defaults: fresh, plane: PlaneStub())
+        #expect(empty.state == .notConnected)
+
+        // e.g. connected in the installed Release app, whose token this Debug build can't see.
+        try store(.release).save("plane_api_release_secret", for: "plane")
+        let saved = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        saved.set(try JSONEncoder().encode(PL.workspace), forKey: "plane.workspace")
+        let plane = PlaneStub()
+        let account = launch(try await launchIngestion(stateURL), defaults: saved, plane: plane)
+        account.refresh()
+        try await wait { account.state == .missingToken(workspace: "plane") }
+        #expect(account.state == .missingToken(workspace: "plane"))
+        #expect(plane.read { $0.listRequests } == 0)
     }
 }

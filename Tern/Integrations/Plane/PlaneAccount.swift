@@ -8,6 +8,9 @@ import Observation
 final class PlaneAccount {
     enum State: Equatable {
         case notConnected
+        /// A workspace is saved but this build has no token for it (e.g. it was connected in the
+        /// other build, which keeps its own Keychain items).
+        case missingToken(workspace: String)
         case connecting
         case connected(workspace: String, user: String?)
         case invalidCredentials(workspace: String)
@@ -38,6 +41,9 @@ final class PlaneAccount {
         service = PlaneSyncService(credentials: credentials, http: http, ingestion: ingestion, interval: interval, now: now)
 
         let workspace = defaults.data(forKey: Self.workspaceKey).flatMap { try? JSONDecoder().decode(PlaneWorkspace.self, from: $0) }
+        // Start from what is saved, so the UI never shows "Not connected" for a saved workspace
+        // while the service is still being configured.
+        sync = PlaneSyncService.Status(phase: workspace == nil ? .notConfigured : .idle, workspace: workspace?.slug)
         Task { [weak self, service] in
             for await status in service.statusUpdates {
                 self?.sync = status
@@ -54,6 +60,8 @@ final class PlaneAccount {
         switch sync.phase {
         case .notConfigured:
             return .notConnected
+        case .missingToken:
+            return .missingToken(workspace: sync.workspace ?? "")
         case .invalidCredentials:
             return .invalidCredentials(workspace: sync.workspace ?? "")
         case .workspaceUnavailable:

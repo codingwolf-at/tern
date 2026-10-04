@@ -30,6 +30,7 @@ struct PlaneDiagnosticsView: View {
     private var phase: String {
         switch sync.phase {
         case .notConfigured: "not connected"
+        case .missingToken: "no token"
         case .idle: "connected"
         case .syncing: "syncing"
         case .invalidCredentials: "token rejected"

@@ -25,6 +25,12 @@ struct PlaneConnectionView: View {
                 Spacer()
                 actions
             }
+            if let buildHint {
+                Text(buildHint)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if isEditing || needsCredentials {
                 form
             }
@@ -40,8 +46,20 @@ struct PlaneConnectionView: View {
     }
 
     private var needsCredentials: Bool {
-        if case .invalidCredentials = account.state { return true }
-        return false
+        switch account.state {
+        case .invalidCredentials, .missingToken: true
+        default: false
+        }
+    }
+
+    /// Debug and Release keep separate Plane tokens, so a Debug build starts disconnected even
+    /// when the installed Tern is connected.
+    private var buildHint: String? {
+        guard BuildEnvironment.current == .debug else { return nil }
+        switch account.state {
+        case .notConnected, .missingToken: return "This Debug build keeps its own Plane token, separate from the installed Tern. Connect once here; it stays across relaunches."
+        default: return nil
+        }
     }
 
     private var form: some View {
@@ -72,7 +90,9 @@ struct PlaneConnectionView: View {
     private var summary: String {
         switch account.state {
         case .notConnected: "Not connected"
+        case .missingToken(let workspace): "No saved token for \(workspace)"
         case .connecting: "Connecting…"
+        case .connected(let workspace, _) where isRetrying: "\(workspace) · can't reach Plane, retrying"
         case .connected(let workspace, let user): "\(workspace)\(user.map { " · \($0)" } ?? "")"
         case .invalidCredentials(let workspace): "Token for \(workspace) was rejected"
         case .workspaceUnavailable(let workspace): "Can't access \(workspace)"
@@ -89,6 +109,10 @@ struct PlaneConnectionView: View {
                 .font(.caption)
         case .connecting:
             ProgressView().controlSize(.mini)
+        case .missingToken:
+            Button("Disconnect") { account.disconnect() }
+                .buttonStyle(.borderless)
+                .font(.caption)
         case .connected, .problem, .workspaceUnavailable, .invalidCredentials:
             Button("Refresh") { account.refresh() }
                 .buttonStyle(.borderless)
@@ -101,7 +125,7 @@ struct PlaneConnectionView: View {
 
     private var symbol: String {
         switch account.state {
-        case .connected: "circle.fill"
+        case .connected where !isRetrying: "circle.fill"
         case .notConnected, .connecting: "circle"
         default: "exclamationmark.triangle.fill"
         }
@@ -109,9 +133,14 @@ struct PlaneConnectionView: View {
 
     private var tint: Color {
         switch account.state {
-        case .connected: .green
+        case .connected where !isRetrying: .green
         case .notConnected, .connecting: .secondary
         default: .orange
         }
+    }
+
+    /// Connected before, but the latest sync failed for a temporary reason. The token stays.
+    private var isRetrying: Bool {
+        account.sync.phase == .failing
     }
 }
