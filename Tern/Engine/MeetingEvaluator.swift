@@ -35,7 +35,7 @@ enum MeetingEvaluator {
         !meeting.isAllDay && meeting.participation != .declined
     }
 
-    static func evaluate(_ meeting: Meeting, context: WorkstreamContext, at now: Date, policy: MeetingPolicy = .standard) -> MeetingStatus {
+    static func evaluate(_ meeting: Meeting, context: SubjectContext, at now: Date, policy: MeetingPolicy = .standard) -> MeetingStatus {
         let phase = phase(of: meeting, at: now, policy: policy)
         let claims = canClaimAttention(meeting) && (phase == .preparing || phase == .startingSoon)
 

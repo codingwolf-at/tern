@@ -35,15 +35,14 @@ struct WorkstreamEvaluation: Hashable, Sendable, Codable {
     )
 }
 
-/// One piece of work, tracked across Plane, GitHub, agents and the calendar.
+/// One piece of work, tracked across Plane, GitHub and agents. Meetings are not workstreams
+/// (see `Meeting`); both are attention subjects.
 struct Workstream: Identifiable, Hashable, Sendable {
     let id: WorkstreamID
     var title: String
     var planeItem: PlaneItemReference?
     var pullRequest: PullRequestReference?
     var agentSessions: [AgentSession]
-    /// Derived from calendar events; context only, never used for ownership.
-    var calendarContext: CalendarContext?
     /// Event history in chronological order.
     var events: [WorkEvent]
     var evaluation: WorkstreamEvaluation
@@ -54,7 +53,6 @@ struct Workstream: Identifiable, Hashable, Sendable {
         planeItem: PlaneItemReference? = nil,
         pullRequest: PullRequestReference? = nil,
         agentSessions: [AgentSession] = [],
-        calendarContext: CalendarContext? = nil,
         events: [WorkEvent] = [],
         evaluation: WorkstreamEvaluation = .initial
     ) {
@@ -63,7 +61,6 @@ struct Workstream: Identifiable, Hashable, Sendable {
         self.planeItem = planeItem
         self.pullRequest = pullRequest
         self.agentSessions = agentSessions
-        self.calendarContext = calendarContext
         self.events = events
         self.evaluation = evaluation
     }

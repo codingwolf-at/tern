@@ -62,11 +62,6 @@ struct Meeting: Identifiable, Hashable, Sendable {
         self.joinURL = joinURL
         self.participation = participation
     }
-
-    /// The key a meeting's attention bookkeeping is stored under, alongside workstreams'.
-    var subjectID: WorkstreamID { WorkstreamID("calendar:\(id)") }
-
-    static func isSubject(_ id: WorkstreamID) -> Bool { id.rawValue.hasPrefix("calendar:") }
 }
 
 /// Where a meeting is in its lifecycle, relative to now.
@@ -85,7 +80,7 @@ enum MeetingPhase: String, Hashable, Sendable {
 /// A meeting together with what Tern makes of it right now.
 struct MeetingStatus: Identifiable, Hashable, Sendable {
     let meeting: Meeting
-    let context: WorkstreamContext
+    let context: SubjectContext
     let phase: MeetingPhase
     /// The same decision shape workstreams have: state, owner, attention, reason, next action.
     var decision: AttentionDecision

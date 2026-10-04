@@ -1,4 +1,4 @@
-/// Why a workstream is surfaced. Every claim on the user names one, so an attention decision
+/// Why an attention subject (a workstream or a meeting) is surfaced. Every claim on the user names one, so an attention decision
 /// can always be explained. Open to new cases as integrations add situations.
 enum AttentionReason: String, Hashable, Sendable, Codable {
     // Interruptions: something happened that needs the user.

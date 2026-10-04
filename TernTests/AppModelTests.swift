@@ -16,7 +16,7 @@ struct AppModelTests {
         try await service.ingest(fixture.observed)
 
         try await waitUntil { model.needsYou.count == 1 }
-        #expect(model.needsYou.first?.status.headline == "Claude finished")
+        #expect(model.needsYou.first?.workstream?.status.headline == "Claude finished")
         #expect(model.waiting.isEmpty)
     }
 

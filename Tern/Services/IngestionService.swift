@@ -326,37 +326,14 @@ actor IngestionService {
         for id in touched {
             guard let record = next.workstreams.first(where: { $0.id == id }) else { continue }
             var workstream = rebuild(record)
-            rebuilt[id] = workstream
-            // Live work outside the active context is kept up to date but never shown, so it is
-            // neither notified nor recorded as seen: its own context decides that later.
-            if mode == .live, isContextScoped, !next.contextRules.context(of: workstream).isIn(next.activeContext) {
-                continue
-            }
-            let transition = workstream.evaluation.transition
-            let previous = next.shownTransitions.first { $0.workstreamID == id }
-            let notify = mode == .live
-                && NotificationPolicy.shouldNotify(transition, lastShown: previous?.transition)
-                && !(previous?.seen.contains(transition.fingerprint) ?? false)
-
-            workstream.evaluation.decision = workstream.evaluation.decision.with(shouldNotify: notify)
-            var seen = (previous?.seen ?? []).filter { $0 != transition.fingerprint } + [transition.fingerprint]
-            seen = Array(seen.suffix(ShownTransition.seenLimit))
-            next.shownTransitions.removeAll { $0.workstreamID == id }
-            next.shownTransitions.append(ShownTransition(workstreamID: id, transition: transition, seen: seen))
-            if notify {
-                let record = NotificationRecord(
-                    workstreamID: id,
-                    fingerprint: transition.fingerprint,
-                    headline: workstream.status.headline,
-                    attention: transition.attention,
-                    createdAt: now()
-                )
-                next.notifications.append(record)
-                report.notifications.append(record)
-            }
+            let notification = next.surface(workstream.evaluation.transition, of: workstream.subjectID,
+                                            in: next.contextRules.context(of: workstream), headline: workstream.status.headline,
+                                            mode: mode, isContextScoped: isContextScoped, at: now())
+            // A workstream's "New" marker lasts until it is next evaluated.
+            workstream.evaluation.decision = workstream.evaluation.decision.with(shouldNotify: notification != nil)
+            if let notification { report.notifications.append(notification) }
             rebuilt[id] = workstream
         }
-        next.notifications = Array(next.notifications.suffix(PersistedState.notificationHistoryLimit))
 
         // Persist, then commit in memory and publish.
         if !report.accepted.isEmpty || next.completedImports != persisted.completedImports {
@@ -377,8 +354,8 @@ actor IngestionService {
     static let meetingHeadline = "Meeting starting soon"
 
     /// Evaluates the current meetings against `state` (its rules, active context and shown
-    /// transitions) at `now()`. Mirrors the workstream path in `ingest`: work outside the active
-    /// context is evaluated but neither notified nor recorded as seen.
+    /// transitions) at `now()`, through the same `surface` path as workstreams. Meetings are
+    /// always live: Calendar has no history to import.
     private func evaluateMeetings(in state: inout PersistedState, notifications: inout [NotificationRecord]) -> [MeetingStatus] {
         let at = now()
         var statuses: [MeetingStatus] = []
@@ -387,35 +364,22 @@ actor IngestionService {
             guard context != .unclassified else { continue }
             var status = MeetingEvaluator.evaluate(meeting, context: context, at: at, policy: meetingPolicy)
             guard status.phase != .ended else { continue }
-            defer { statuses.append(status) }
-            guard !isContextScoped || context.isIn(state.activeContext) else { continue }
-            // Only attention-claiming transitions are bookkept; a quiet upcoming meeting has nothing to remember.
-            guard status.needsAttentionNow else { continue }
-
-            let id = meeting.subjectID
-            let transition = status.transition
-            let previous = state.shownTransitions.first { $0.workstreamID == id }
-            let notify = NotificationPolicy.shouldNotify(transition, lastShown: previous?.transition)
-                && !(previous?.seen.contains(transition.fingerprint) ?? false)
-            if previous?.transition != transition {
-                let seen = ((previous?.seen ?? []).filter { $0 != transition.fingerprint } + [transition.fingerprint]).suffix(ShownTransition.seenLimit)
-                state.shownTransitions.removeAll { $0.workstreamID == id }
-                state.shownTransitions.append(ShownTransition(workstreamID: id, transition: transition, seen: Array(seen)))
+            // A meeting has a transition worth remembering only once it claims attention; a quiet
+            // upcoming meeting leaves no trace in the saved state.
+            if status.needsAttentionNow {
+                let subject = meeting.subjectID
+                if let notification = state.surface(status.transition, of: subject, in: context, headline: Self.meetingHeadline,
+                                                    mode: .live, isContextScoped: isContextScoped, at: at) {
+                    notifications.append(notification)
+                }
+                // A meeting's "New" marker lasts while the transition it was surfaced for is current.
+                status.decision = status.decision.with(shouldNotify: state.wasNotified(status.transition, of: subject))
             }
-            if notify {
-                let record = NotificationRecord(workstreamID: id, fingerprint: transition.fingerprint, headline: Self.meetingHeadline,
-                                                attention: transition.attention, createdAt: at)
-                state.notifications.append(record)
-                notifications.append(record)
-            }
-            // "New" stays while the surfaced transition is the current one.
-            let surfaced = state.notifications.contains { $0.workstreamID == id && $0.fingerprint == transition.fingerprint }
-            status.decision = status.decision.with(shouldNotify: surfaced)
+            statuses.append(status)
         }
-        state.notifications = Array(state.notifications.suffix(PersistedState.notificationHistoryLimit))
         // Forget meetings surfaced long ago, so bookkeeping doesn't grow with every meeting.
         state.shownTransitions.removeAll { shown in
-            guard Meeting.isSubject(shown.workstreamID), let causeAt = shown.transition.causeAt else { return false }
+            guard shown.subjectID.isMeeting, let causeAt = shown.transition.causeAt else { return false }
             return at.timeIntervalSince(causeAt) > Self.meetingBookkeepingRetention
         }
         return statuses
@@ -460,7 +424,7 @@ actor IngestionService {
             seen.remove(event.id)
         }
         next.workstreams[index].events = []
-        next.shownTransitions.removeAll { $0.workstreamID == id }
+        next.shownTransitions.removeAll { $0.subjectID == SubjectID(workstream: id) }
         try store.save(next)
         persisted = next
         workstreams[id] = rebuild(next.workstreams[index])

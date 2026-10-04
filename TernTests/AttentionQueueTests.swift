@@ -221,7 +221,7 @@ struct AttentionQueueTests {
             GH.pr(id: "N", number: 2, title: "No reviewer", head: "n"),
             GH.pr(id: "C", number: 3, title: "Changes", head: "c", reviews: [GH.review(1, "CHANGES_REQUESTED", by: "priya", at: GH.at(30))]),
         ])
-        #expect(m.needsYou.map(\.title) == ["Changes"])
+        #expect(m.needsYou.map(\.workstream?.title) == ["Changes"])
         #expect(Set(m.yourWork.map(\.title)) == ["Draft", "No reviewer"])
         #expect(m.attentionQueue.count == 1)
     }
@@ -243,7 +243,7 @@ struct AttentionQueueTests {
         let m = try await model(prs)
         #expect(m.needsYou.count == 3)
         #expect(m.more.count == 2)
-        #expect(Set((m.needsYou + m.more).map(\.title)) == Set(prs.map(\.title)))
+        #expect(Set((m.needsYou + m.more).map(\.workstream?.title)) == Set(prs.map { Optional($0.title) }))
     }
 
     @Test("Primary work outranks low-priority work when otherwise equal")

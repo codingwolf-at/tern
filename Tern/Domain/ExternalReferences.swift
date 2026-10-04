@@ -79,8 +79,3 @@ struct AgentSession: Identifiable, Hashable, Sendable, Codable {
         agentName.split(separator: " ").first.map(String.init) ?? agentName
     }
 }
-
-struct CalendarContext: Hashable, Sendable, Codable {
-    var title: String
-    var startsAt: Date
-}

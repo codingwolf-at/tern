@@ -174,8 +174,7 @@ struct WorkstreamFacts: Hashable, Sendable {
             if agentRuns[id] != nil { agentRuns[id]?.updated = stamp }
 
         default:
-            // Pull request kinds go to their own facts; unknown or context-only kinds
-            // (e.g. calendar) do not change ownership.
+            // Pull request kinds go to their own facts; unknown kinds do not change ownership.
             _ = pullRequest.apply(event, stamp: stamp)
         }
     }

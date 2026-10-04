@@ -123,9 +123,9 @@ struct ContextTests {
         try await service.ingest(failingPR(Self.work, 1) + failingPR(Self.side, 2) + failingPR(Self.stranger, 3), mode: .historyImport)
         let model = try await model(service)
 
-        #expect(model.needsYou.map(\.pullRequest?.repository) == [Self.work])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.repository) == [Self.work])
         model.setActiveContext(.personal)
-        #expect(model.needsYou.map(\.pullRequest?.repository) == [Self.side])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.repository) == [Self.side])
         for context in TernContext.allCases {
             model.setActiveContext(context)
             #expect(!model.scoped.contains { $0.pullRequest?.repository == Self.stranger })
@@ -143,7 +143,7 @@ struct ContextTests {
 
         model.setActiveContext(.personal)
         #expect(model.attentionQueue.count == 1)
-        #expect(model.needsYou.map(\.pullRequest?.number) == [3])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.number) == [3])
 
         // Classifying the unknown repository brings it into a context.
         try await service.ingest(failingPR(Self.stranger, 4), mode: .historyImport)
@@ -245,13 +245,13 @@ struct ContextTests {
         model.setActiveContext(.professional)
         await model.changesSaved()
         try await settle(model) { model.workstreams.count == 2 }
-        #expect(model.needsYou.compactMap(\.pullRequest?.number).sorted() == [1, 2])
+        #expect(model.needsYou.compactMap(\.workstream?.pullRequest?.number).sorted() == [1, 2])
         // D: personal work while Professional is active is quiet; E: it surfaces in Personal.
         #expect(try await service.ingest(failingPR(Self.side, 3)).notifications.isEmpty)
         try await settle(model) { model.workstreams.count == 3 }
         #expect(model.needsYou.count == 2)
         model.setActiveContext(.personal)
-        #expect(model.needsYou.map(\.pullRequest?.number) == [3])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.number) == [3])
         // Switching back and forth, and replaying the same events, adds no notifications.
         for context in [TernContext.professional, .personal, .professional] { try await service.setActiveContext(context) }
         #expect(try await service.ingest(failingPR(Self.work, 1) + failingPR(Self.side, 3)).notifications.isEmpty)
@@ -267,18 +267,18 @@ struct ContextTests {
         #expect(model.needsYou.isEmpty)
 
         model.setContext(.personal, forOwner: "acme")
-        #expect(model.needsYou.compactMap(\.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
+        #expect(model.needsYou.compactMap(\.workstream?.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
         model.setContext(.professional, repository: "acme/web")
-        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/api"])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.repository) == ["acme/api"])
         // Changing the owner again doesn't move the overridden repository.
         model.setContext(.professional, forOwner: "acme")
         model.setActiveContext(.professional)
-        #expect(model.needsYou.compactMap(\.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
+        #expect(model.needsYou.compactMap(\.workstream?.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
         model.setContext(.personal, repository: "acme/api")
-        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/web"])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.repository) == ["acme/web"])
         // Clearing the owner leaves only the overrides.
         model.setContext(nil, forOwner: "acme")
-        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/web"])
+        #expect(model.needsYou.map(\.workstream?.pullRequest?.repository) == ["acme/web"])
         model.setContext(nil, repository: "acme/web")
         #expect(model.needsYou.isEmpty)
         #expect(model.unclassified.compactMap(\.pullRequest?.repository).sorted() == ["acme/web", "atul/blog"])

@@ -21,7 +21,7 @@ struct Priority: Hashable, Sendable, Comparable {
 /// | Part        | Points | Why |
 /// |-------------|--------|-----|
 /// | Ownership   | me 40 · agent 20 · reviewer/CI/external 5 · nobody 0 | Things you can act on come first; an agent at work is your work in progress. |
-/// | Reason      | needs input 30 · changes requested 28 · CI failed / reviewer responded 26 · review requested / agent failed 24 · approved 20 · agent finished 18 · reopened 15 · changes pushed / approval outdated 8 · no reviewer 4 · draft / ready to start 2 | Direct requests from people and blocked agents outrank housekeeping. |
+/// | Reason      | needs input 30 · changes requested 28 · CI failed / reviewer responded / meeting soon 26 · review requested / agent failed 24 · approved 20 · agent finished 18 · reopened 15 · changes pushed / approval outdated 8 · no reviewer 4 · draft / ready to start 2 | Direct requests from people and blocked agents outrank housekeeping. |
 /// | Relevance   | primary +25 · normal 0 · low priority −20 · muted −60 | The user's own statement of what matters; never inferred from names. |
 /// | Recency     | <1h +15 · <1d +10 · <3d +5 · <14d 0 · older −10 | A fresh transition is more likely to matter now than an old state. |
 /// | Active work | agent in progress +10 · planned work (linked work item) +5 | What you're doing now beats unrelated stale work. |
@@ -29,6 +29,13 @@ struct Priority: Hashable, Sendable, Comparable {
 /// Reason weights keep the levels apart: a person waiting on you (24–30) always beats a
 /// merge (20) at equal relevance, while one step of relevance (±20–25) can reorder them,
 /// which is the point of letting the user mark work as primary or low priority.
+///
+/// A meeting inside its preparation window is scored from its own inputs on the same scale:
+/// ownership (me, 40) + reason (meeting soon, 26) + recency (it entered the window minutes ago,
+/// +15) − 10 when the user hasn't accepted it (tentative or no reply). So a confirmed meeting
+/// (81) beats stale work and a fresh review request (79), but not a fresh change request (83),
+/// an agent waiting on input, or anything in a primary repository. Repository importance
+/// doesn't apply to meetings, and meetings never change a workstream's score.
 enum PriorityModel {
     static func priority(of workstream: Workstream, importance: RepositoryImportance, now: Date) -> Priority {
         var parts: [Priority.Part] = []
@@ -53,14 +60,7 @@ enum PriorityModel {
         }
         if relevance != 0 { parts.append(.init(label: importance.rawValue, points: relevance)) }
 
-        let age = workstream.lastMeaningfulChange.map { now.timeIntervalSince($0) } ?? .infinity
-        let recency = switch age {
-        case ..<3600: 15
-        case ..<86_400: 10
-        case ..<(3 * 86_400): 5
-        case ..<(14 * 86_400): 0
-        default: -10
-        }
+        let recency = recency(since: workstream.lastMeaningfulChange, now: now)
         if recency != 0 { parts.append(.init(label: "recency", points: recency)) }
 
         if workstream.agentSessions.contains(where: { $0.status == .working || $0.status == .needsInput }) {
@@ -72,11 +72,45 @@ enum PriorityModel {
         return Priority(parts: parts)
     }
 
+    static func priority(of meeting: MeetingStatus, now: Date) -> Priority {
+        guard meeting.needsAttentionNow, let reason = meeting.decision.reason else {
+            return Priority(parts: [.init(label: "owner none", points: 0)])
+        }
+        var parts: [Priority.Part] = [
+            .init(label: "owner me", points: 40),
+            .init(label: reason.rawValue, points: weight(reason)),
+        ]
+        let recency = recency(since: meeting.transition.causeAt, now: now)
+        if recency != 0 { parts.append(.init(label: "recency", points: recency)) }
+        if meeting.meeting.participation == .tentative || meeting.meeting.participation == .pending {
+            parts.append(.init(label: "not accepted", points: -10))
+        }
+        return Priority(parts: parts)
+    }
+
+    static func priority(of item: AttentionItem, importance: (Workstream) -> RepositoryImportance, now: Date) -> Priority {
+        switch item {
+        case .workstream(let workstream): priority(of: workstream, importance: importance(workstream), now: now)
+        case .meeting(let meeting): priority(of: meeting, now: now)
+        }
+    }
+
+    /// A fresh transition is more likely to matter now than an old state.
+    private static func recency(since date: Date?, now: Date) -> Int {
+        switch date.map({ now.timeIntervalSince($0) }) ?? .infinity {
+        case ..<3600: 15
+        case ..<86_400: 10
+        case ..<(3 * 86_400): 5
+        case ..<(14 * 86_400): 0
+        default: -10
+        }
+    }
+
     static func weight(_ reason: AttentionReason) -> Int {
         switch reason {
         case .agentNeedsInput: 30
         case .changesRequested: 28
-        case .ciFailed, .reviewerResponded: 26
+        case .ciFailed, .reviewerResponded, .meetingSoon: 26
         case .reviewRequested, .agentFailed: 24
         case .approvedReadyToMerge: 20
         case .agentCompleted: 18
@@ -86,23 +120,29 @@ enum PriorityModel {
         case .stale: 5
         case .needsReviewer: 4
         case .draft, .readyToStart: 2
-        // Meetings are shown on their own and never ranked against workstreams.
-        case .meetingSoon: 0
         }
     }
 
-    /// Highest priority first; ties go to the more recent change, then the workstream ID, so
-    /// the order never depends on input order.
-    static func ranked(_ workstreams: [Workstream], importance: (Workstream) -> RepositoryImportance, now: Date) -> [Workstream] {
-        workstreams
-            .map { ($0, priority(of: $0, importance: importance($0), now: now)) }
+    /// Highest priority first; ties go to the more recent change, then the subject ID, so the
+    /// order never depends on input order. Workstreams and meetings rank on one scale.
+    static func ranked(_ items: [AttentionItem], importance: (Workstream) -> RepositoryImportance, now: Date) -> [AttentionItem] {
+        items
+            .map { ($0, priority(of: $0, importance: importance, now: now)) }
             .sorted { lhs, rhs in
                 if lhs.1.score != rhs.1.score { return lhs.1.score > rhs.1.score }
+                // Of two equally pressing meetings, the one starting sooner.
+                if let l = lhs.0.meeting, let r = rhs.0.meeting, l.meeting.startsAt != r.meeting.startsAt {
+                    return l.meeting.startsAt < r.meeting.startsAt
+                }
                 let l = lhs.0.lastMeaningfulChange ?? .distantPast, r = rhs.0.lastMeaningfulChange ?? .distantPast
                 if l != r { return l > r }
-                return lhs.0.id.rawValue < rhs.0.id.rawValue
+                return lhs.0.id < rhs.0.id
             }
             .map(\.0)
+    }
+
+    static func ranked(_ workstreams: [Workstream], importance: (Workstream) -> RepositoryImportance, now: Date) -> [Workstream] {
+        ranked(workstreams.map(AttentionItem.workstream), importance: importance, now: now).compactMap(\.workstream)
     }
 }
 

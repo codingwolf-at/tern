@@ -74,9 +74,7 @@ struct MockScenario: Sendable {
     var avatarMigrationScript: [ObservedEvent] {
         let plane = ExternalReference.planeItem("PLANE-1842")
         let pr = ExternalReference.pullRequest(repository: Self.repository, number: 421)
-        let meeting = ISO8601DateFormatter().string(from: now.addingTimeInterval(minutes(45)))
         return [
-            event(EventID(.calendar, "event", "avatar-sync"), .calendar, .calendarEventScheduled, 24 * 60, [plane], [.title: "Avatar rollout sync", .startsAt: meeting]),
             event(EventID(.plane, "item", "PLANE-1842", "created"), .plane, .planeItemCreated, 6 * 60, [plane]),
             event(EventID(.github, "pr", "421", "opened"), .github, .pullRequestOpened, 4 * 60, [pr]),
             event(EventID(.github, "review-request", "7001"), .github, .reviewRequested, 3 * 60 + 50, [pr], [.reviewer: "Priya"]),

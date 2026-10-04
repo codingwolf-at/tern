@@ -20,26 +20,26 @@ struct TernPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    section("Needs you", model.needsYou, meetings: model.meetingsNeedingYou, empty: "Nothing needs you right now.")
+                    section("Needs you", model.needsYou, empty: "Nothing needs you right now.")
                     if model.upNext != nil || model.meetingInProgress != nil {
                         upNextSection
                     }
                     if !model.more.isEmpty {
                         compactSection("More", model.more, symbol: "circle.fill", detail: true)
                     }
-                    section("Waiting", Array(model.waiting.prefix(AppModel.waitingLimit)), empty: nil)
+                    section("Waiting", model.waiting.prefix(AppModel.waitingLimit).map(AttentionItem.workstream), empty: nil)
                     if model.waiting.count > AppModel.waitingLimit {
-                        compactSection("More waiting", Array(model.waiting.dropFirst(AppModel.waitingLimit)), symbol: "circle", detail: true)
+                        compactSection("More waiting", model.waiting.dropFirst(AppModel.waitingLimit).map(AttentionItem.workstream), symbol: "circle", detail: true)
                     }
-                    section("Active", model.active, empty: nil)
+                    section("Active", model.active.map(AttentionItem.workstream), empty: nil)
                     if !model.yourWork.isEmpty {
-                        compactSection("Your other work", model.yourWork, symbol: "minus", detail: true)
+                        compactSection("Your other work", model.yourWork.map(AttentionItem.workstream), symbol: "minus", detail: true)
                     }
                     if !model.doneToday.isEmpty {
-                        compactSection("Done today", model.doneToday, symbol: "checkmark", detail: false)
+                        compactSection("Done today", model.doneToday.map(AttentionItem.workstream), symbol: "checkmark", detail: false)
                     }
                     if !model.idle.isEmpty {
-                        compactSection("Idle", model.idle, symbol: "pause", detail: true)
+                        compactSection("Idle", model.idle.map(AttentionItem.workstream), symbol: "pause", detail: true)
                     }
                     if !model.unclassified.isEmpty {
                         unclassifiedSection
@@ -195,7 +195,7 @@ struct TernPanel: View {
     }
 
     private var summary: String {
-        let count = model.needsYouCount
+        let count = model.attentionQueue.count
         return count == 0 ? "All quiet" : "\(count) need\(count == 1 ? "s" : "") you"
     }
 
@@ -212,75 +212,114 @@ struct TernPanel: View {
         }
     }
 
-    /// Meetings about to start come first: they're time-bound and gone in minutes. Workstreams
-    /// keep their own ranking below them.
     @ViewBuilder
-    private func section(_ title: String, _ workstreams: [Workstream], meetings: [MeetingStatus] = [], empty: String?) -> some View {
-        if !workstreams.isEmpty || !meetings.isEmpty || empty != nil {
+    private func section(_ title: String, _ items: [AttentionItem], empty: String?) -> some View {
+        if !items.isEmpty || empty != nil {
             VStack(alignment: .leading, spacing: 2) {
                 SectionHeader(title: title)
-                ForEach(meetings) { meeting in
-                    MeetingRow(status: meeting)
-                }
-                if workstreams.isEmpty, meetings.isEmpty, let empty {
+                if items.isEmpty, let empty {
                     Text(empty)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
                 }
-                ForEach(workstreams) { workstream in
-                    WorkstreamRow(
-                        workstream: workstream,
-                        isExpanded: expandedID == workstream.id,
-                        toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id }
-                    )
-                    .contextMenu {
-                        importanceMenu(for: workstream)
-                        if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
+                ForEach(items) { item in
+                    switch item {
+                    case .workstream(let workstream):
+                        WorkstreamRow(
+                            workstream: workstream,
+                            isExpanded: expandedID == workstream.id,
+                            toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id }
+                        )
+                        .contextMenu {
+                            importanceMenu(for: workstream)
+                            if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
+                        }
+                    case .meeting(let meeting):
+                        MeetingRow(status: meeting)
                     }
                 }
             }
         }
     }
 
-    /// One line per workstream, collapsed behind a disclosure when there are many.
-    private func compactSection(_ title: String, _ workstreams: [Workstream], symbol: String, detail: Bool) -> some View {
+    /// One line per item, collapsed behind a disclosure when there are many.
+    private func compactSection(_ title: String, _ items: [AttentionItem], symbol: String, detail: Bool) -> some View {
         DisclosureGroup {
-            ForEach(workstreams) { workstream in
-                HStack(spacing: 8) {
-                    Image(systemName: symbol)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 10)
-                    Text(workstream.primaryLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(workstream.title)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                    Spacer()
-                    if detail {
-                        Text(workstream.status.headline)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
+            ForEach(items) { item in
+                switch item {
+                case .workstream(let workstream):
+                    compactRow(workstream, symbol: symbol, detail: detail)
+                case .meeting(let meeting):
+                    compactRow(meeting, symbol: symbol)
                 }
-                .padding(.vertical, 2)
-                .contextMenu {
-                        importanceMenu(for: workstream)
-                        if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
-                    }
             }
         } label: {
-            Text("\(title.uppercased()) · \(workstreams.count)")
+            Text("\(title.uppercased()) · \(items.count)")
                 .font(.caption2.weight(.semibold))
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8)
+    }
+
+    private func compactRow(_ meeting: MeetingStatus, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 10)
+            Text("Meeting")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(meeting.meeting.title)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer()
+            TimelineView(.everyMinute) { context in
+                Text(MeetingRow.timing(of: meeting.meeting, phase: meeting.phase, now: context.date))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            if let url = meeting.meeting.joinURL {
+                Button("Join meeting") { NSWorkspace.shared.open(url) }
+            }
+            Button("Open Calendar") { MeetingRow.openCalendar() }
+        }
+    }
+
+    private func compactRow(_ workstream: Workstream, symbol: String, detail: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 10)
+            Text(workstream.primaryLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(workstream.title)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer()
+            if detail {
+                Text(workstream.status.headline)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            importanceMenu(for: workstream)
+            if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
+        }
     }
 
     /// Lets the user say how much a repository matters. Only for work with a known repository.

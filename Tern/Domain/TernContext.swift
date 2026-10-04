@@ -14,12 +14,20 @@ enum TernContext: String, Hashable, Sendable, Codable, CaseIterable {
     }
 }
 
-/// Where a workstream belongs. `unclassified` work takes part in neither context until the
-/// user says where its repository belongs.
-enum WorkstreamContext: Hashable, Sendable {
+/// Where an attention subject (a workstream or a meeting) belongs. An `unclassified` subject
+/// takes part in neither context until the user classifies its repository or calendar.
+enum SubjectContext: Hashable, Sendable {
     case personal
     case professional
     case unclassified
+
+    var title: String {
+        switch self {
+        case .personal: "Personal"
+        case .professional: "Professional"
+        case .unclassified: "Unclassified"
+        }
+    }
 
     init(_ context: TernContext) {
         switch context {
@@ -29,7 +37,7 @@ enum WorkstreamContext: Hashable, Sendable {
     }
 
     func isIn(_ context: TernContext) -> Bool {
-        self == WorkstreamContext(context)
+        self == SubjectContext(context)
     }
 }
 
@@ -62,8 +70,8 @@ struct ContextRules: Hashable, Sendable, Codable {
         calendars = try container.decodeIfPresent([String: TernContext].self, forKey: .calendars) ?? [:]
     }
 
-    func context(forCalendar calendarID: String) -> WorkstreamContext {
-        calendars[calendarID].map(WorkstreamContext.init) ?? .unclassified
+    func context(forCalendar calendarID: String) -> SubjectContext {
+        calendars[calendarID].map(SubjectContext.init) ?? .unclassified
     }
 
     /// Sets (or with `nil`, clears) a calendar's context.
@@ -72,14 +80,14 @@ struct ContextRules: Hashable, Sendable, Codable {
     }
 
     /// `github.com/owner/name` (or `owner/name`) → its context.
-    func context(forRepository repository: String) -> WorkstreamContext {
+    func context(forRepository repository: String) -> SubjectContext {
         let key = RepositoryImportance.key(forRepository: repository)
-        if let context = repositories[key] { return WorkstreamContext(context) }
-        if let owner = Self.owner(of: key), let context = owners[owner] { return WorkstreamContext(context) }
+        if let context = repositories[key] { return SubjectContext(context) }
+        if let owner = Self.owner(of: key), let context = owners[owner] { return SubjectContext(context) }
         return .unclassified
     }
 
-    func context(of workstream: Workstream) -> WorkstreamContext {
+    func context(of workstream: Workstream) -> SubjectContext {
         let repository = workstream.repositoryKey.map(context(forRepository:))
         if workstream.planeItem != nil {
             return repository == .personal ? .unclassified : .professional

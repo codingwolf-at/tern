@@ -21,7 +21,7 @@ struct PersistedState: Hashable, Sendable, Codable {
     /// Which context the user is looking at, and which repositories belong to which context.
     var activeContext: TernContext = .professional
     var contextRules = ContextRules()
-    /// The last transition surfaced to the user for each workstream.
+    /// The last transition surfaced to the user for each attention subject (workstream or meeting).
     var shownTransitions: [ShownTransition] = []
     /// Most recent notifications, newest last.
     var notifications: [NotificationRecord] = []
@@ -48,8 +48,8 @@ struct PersistedState: Hashable, Sendable, Codable {
         repositoryImportance = try container.decodeIfPresent([String: RepositoryImportance].self, forKey: .repositoryImportance) ?? [:]
         activeContext = try container.decodeIfPresent(TernContext.self, forKey: .activeContext) ?? .professional
         contextRules = try container.decodeIfPresent(ContextRules.self, forKey: .contextRules) ?? ContextRules()
-        shownTransitions = try container.decode([ShownTransition].self, forKey: .shownTransitions)
-        notifications = try container.decode([NotificationRecord].self, forKey: .notifications)
+        shownTransitions = try container.decodeIfPresent([ShownTransition].self, forKey: .shownTransitions) ?? []
+        notifications = try container.decodeIfPresent([NotificationRecord].self, forKey: .notifications) ?? []
     }
 }
 
@@ -62,25 +62,48 @@ struct WorkstreamRecord: Hashable, Sendable, Codable {
     var events: [WorkEvent]
 }
 
+/// The last transition surfaced for one attention subject.
 struct ShownTransition: Hashable, Sendable, Codable {
-    let workstreamID: WorkstreamID
+    let subjectID: SubjectID
     let transition: AttentionTransition
-    /// Fingerprints of transitions already shown for this workstream (newest last), so coming
+    /// Fingerprints of transitions already shown for this subject (newest last), so coming
     /// back to one — e.g. after an agent turn — isn't news.
     var seen: [String] = []
 
     static let seenLimit = 50
 
-    init(workstreamID: WorkstreamID, transition: AttentionTransition, seen: [String] = []) {
-        self.workstreamID = workstreamID
+    enum CodingKeys: String, CodingKey {
+        case subjectID, transition, seen
+    }
+
+    init(subjectID: SubjectID, transition: AttentionTransition, seen: [String] = []) {
+        self.subjectID = subjectID
         self.transition = transition
         self.seen = seen
     }
 
+    /// Reads records saved before subjects existed, keyed `workstreamID` and without `seen`.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        workstreamID = try container.decode(WorkstreamID.self, forKey: .workstreamID)
+        subjectID = try SubjectID.decode(from: decoder, container, key: .subjectID)
         transition = try container.decode(AttentionTransition.self, forKey: .transition)
         seen = try container.decodeIfPresent([String].self, forKey: .seen) ?? [transition.fingerprint]
+    }
+}
+
+extension SubjectID {
+    private struct LegacyKey: CodingKey {
+        static let workstreamID = LegacyKey(stringValue: "workstreamID")
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    /// Decodes `key`, falling back to the `workstreamID` key that records used before meetings
+    /// existed. A workstream's subject ID equals its workstream ID, so old records keep matching.
+    static func decode<Key: CodingKey>(from decoder: any Decoder, _ container: KeyedDecodingContainer<Key>, key: Key) throws -> SubjectID {
+        if let id = try container.decodeIfPresent(SubjectID.self, forKey: key) { return id }
+        return try decoder.container(keyedBy: LegacyKey.self).decode(SubjectID.self, forKey: .workstreamID)
     }
 }

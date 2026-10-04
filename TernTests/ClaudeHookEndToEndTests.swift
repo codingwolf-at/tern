@@ -60,9 +60,9 @@ struct ClaudeHookEndToEndTests {
 
         let permission = try #require(try runHelper(hook("Notification", #","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash""#)))
         await model.claudeHooks.handle(permission)
-        try await waitUntil { model.needsYou.first?.status.headline == "Claude needs your input" }
-        #expect(model.needsYou.first?.attention == .high)
-        #expect(model.needsYou.first?.title == "ü")
+        try await waitUntil { model.needsYou.first?.workstream?.status.headline == "Claude needs your input" }
+        #expect(model.needsYou.first?.workstream?.attention == .high)
+        #expect(model.needsYou.first?.workstream?.title == "ü")
 
         let resumed = try #require(try runHelper(hook("PostToolUse", #","tool_name":"Bash""#)))
         await model.claudeHooks.handle(resumed)
@@ -70,7 +70,7 @@ struct ClaudeHookEndToEndTests {
 
         let stop = try #require(try runHelper(hook("Stop", #","last_assistant_message":"secret answer""#)))
         await model.claudeHooks.handle(stop)
-        try await waitUntil { model.needsYou.first?.status.headline == "Claude finished" }
+        try await waitUntil { model.needsYou.first?.workstream?.status.headline == "Claude finished" }
 
         // Re-delivery of the same URL changes nothing.
         let report = await model.claudeHooks.handle(stop)
@@ -90,7 +90,7 @@ struct ClaudeHookEndToEndTests {
         router.open(urls)
         router.start { await model.claudeHooks.handle($0) }
 
-        try await waitUntil { model.needsYou.first?.status.headline == "Claude finished" }
+        try await waitUntil { model.needsYou.first?.workstream?.status.headline == "Claude finished" }
         #expect(model.claudeHooks.activity.received == 2)
     }
 

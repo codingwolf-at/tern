@@ -5,6 +5,8 @@ enum EventSource: String, Hashable, Sendable, Codable, CaseIterable {
     case github
     case plane
     case agent
+    /// Meetings. They are never work events; the source only namespaces the cause of a
+    /// meeting's attention transition (see `MeetingEvaluator`).
     case calendar
 }
 
@@ -83,9 +85,6 @@ extension WorkEventKind {
     static let agentCompleted = WorkEventKind(rawValue: "agent.session.completed")
     static let agentFailed = WorkEventKind(rawValue: "agent.session.failed")
     static let agentSessionEnded = WorkEventKind(rawValue: "agent.session.ended")
-
-    // Calendar
-    static let calendarEventScheduled = WorkEventKind(rawValue: "calendar.event.scheduled")
 }
 
 /// A normalized event that has been linked to a workstream.
@@ -133,7 +132,6 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let checkName = MetadataKey(rawValue: "checkName")
     static let reason = MetadataKey(rawValue: "reason")
     static let title = MetadataKey(rawValue: "title")
-    static let startsAt = MetadataKey(rawValue: "startsAt")
     /// Who caused the event (a login or name), and whether that was the user.
     static let actor = MetadataKey(rawValue: "actor")
     static let actorIsMe = MetadataKey(rawValue: "actorIsMe")

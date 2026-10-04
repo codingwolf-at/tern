@@ -101,7 +101,7 @@ final class AppModel {
     /// Debug-built tests that ignore contexts.
     private(set) var isContextScoped = true
 
-    func context(of workstream: Workstream) -> WorkstreamContext {
+    func context(of workstream: Workstream) -> SubjectContext {
         contextRules.context(of: workstream)
     }
 
@@ -154,12 +154,9 @@ final class AppModel {
         return meetings.filter { contextRules.context(forCalendar: $0.meeting.calendarID).isIn(activeContext) }
     }
 
-    /// Meetings inside their preparation window: they need the user now.
-    var meetingsNeedingYou: [MeetingStatus] {
-        scopedMeetings.filter(\.needsAttentionNow)
-    }
-
-    /// The next meeting that will claim attention, once it is close. One, not an agenda.
+    /// Up next: useful upcoming context that doesn't need action yet. Never a meeting that is
+    /// already a Needs you candidate. The next meeting that will claim attention once it is
+    /// close — one, not an agenda.
     var upNext: MeetingStatus? {
         scopedMeetings.first { $0.phase == .upcoming && MeetingEvaluator.canClaimAttention($0.meeting) }
     }
@@ -167,11 +164,6 @@ final class AppModel {
     /// A meeting under way, kept quietly so it can still be joined. Gone once it ends.
     var meetingInProgress: MeetingStatus? {
         scopedMeetings.first { $0.phase == .inProgress && MeetingEvaluator.canClaimAttention($0.meeting) }
-    }
-
-    /// The badge: workstreams that need the user plus meetings about to start.
-    var needsYouCount: Int {
-        attentionQueue.count + meetingsNeedingYou.count
     }
 
     // MARK: - Queue
@@ -193,24 +185,35 @@ final class AppModel {
         PriorityModel.priority(of: workstream, importance: importance(of: workstream), now: now())
     }
 
+    func priority(of item: AttentionItem) -> Priority {
+        PriorityModel.priority(of: item, importance: importance(of:), now: now())
+    }
+
     private func ranked(_ workstreams: [Workstream]) -> [Workstream] {
         PriorityModel.ranked(workstreams, importance: importance(of:), now: now())
     }
 
-    /// Everything that warrants an interruption, best first. Muted repositories never interrupt.
-    var attentionQueue: [Workstream] {
-        ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) != .muted })
+    private func ranked(_ items: [AttentionItem]) -> [AttentionItem] {
+        PriorityModel.ranked(items, importance: importance(of:), now: now())
+    }
+
+    /// Everything in the active context that warrants an interruption, best first: workstreams
+    /// whose turn is the user's, and meetings inside their preparation window, on one ranking.
+    /// Muted repositories never interrupt. Its size is the badge.
+    var attentionQueue: [AttentionItem] {
+        ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) != .muted }.map(AttentionItem.workstream)
+            + scopedMeetings.filter(\.needsAttentionNow).map(AttentionItem.meeting))
     }
 
     /// The few things worth dealing with now.
-    var needsYou: [Workstream] {
+    var needsYou: [AttentionItem] {
         Array(attentionQueue.prefix(Self.needsYouLimit))
     }
 
     /// Lower-priority items that would also warrant attention, kept out of the way.
-    var more: [Workstream] {
+    var more: [AttentionItem] {
         Array(attentionQueue.dropFirst(Self.needsYouLimit))
-            + ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) == .muted })
+            + ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) == .muted }).map(AttentionItem.workstream)
     }
 
     /// Someone else (a reviewer, CI, an author) owes the next step.

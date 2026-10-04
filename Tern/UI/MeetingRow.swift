@@ -111,13 +111,3 @@ struct MeetingRow: View {
         NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
     }
 }
-
-extension WorkstreamContext {
-    var title: String {
-        switch self {
-        case .personal: "Personal"
-        case .professional: "Professional"
-        case .unclassified: "Unclassified"
-        }
-    }
-}

@@ -36,7 +36,7 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 - **Panel sections.** *Needs you*, *Waiting*, *Active*, *Your other work*, *Done today* and *Idle*.
 - **Personal / Professional contexts.** Work is separated into two contexts; only the active one counts toward the queue and badge.
 - **Transition-based alerts.** Tern decides whether a change is worth surfacing by comparing it against what you were last shown, and marks genuinely new items in the panel.
-- **Meeting awareness.** A meeting from a calendar you classified enters *Needs you* 15 minutes before it starts, once, with a Join action when the event carries a call link.
+- **Meeting awareness.** A meeting from a calendar you classified becomes a candidate for *Needs you* 15 minutes before it starts, ranked with your work on one scale, with a Join action when the event carries a call link.
 - **Integrations.** GitHub (through the `gh` CLI), Plane, Claude Code hooks, and macOS Calendar (read-only).
 
 ## Screenshots

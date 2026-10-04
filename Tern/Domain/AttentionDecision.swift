@@ -11,7 +11,8 @@ struct NextAction: Hashable, Sendable, Codable {
     }
 }
 
-/// Deterministic result of evaluating a workstream.
+/// Deterministic result of evaluating an attention subject: a workstream from its history,
+/// or a meeting at a moment in time.
 ///
 /// `shouldNotify` is not derived from the event history: it is set by ingestion when newly
 /// observed data produces a transition the user has not been shown yet.

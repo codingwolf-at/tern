@@ -136,9 +136,6 @@ private struct WorkstreamDetail: View {
             if !links.isEmpty {
                 row("Links", links.joined(separator: " · "))
             }
-            if let meeting = workstream.calendarContext {
-                row("Calendar", "\(meeting.title) \(Age.until(meeting.startsAt))")
-            }
             if let plane = workstream.planeItem {
                 GridRow {
                     Text("Plane")

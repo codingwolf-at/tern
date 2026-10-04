@@ -194,19 +194,19 @@ struct CalendarTests {
                         Self.meeting("o", in: Self.other, startsIn: 10)]
         let report = try await service.observeMeetings(meetings)
         // Only the professional meeting notifies; the unclassified one isn't even kept.
-        #expect(report.notifications.map(\.workstreamID) == [Meeting.subjectID("w")])
+        #expect(report.notifications.map(\.subjectID) == [SubjectID(meeting: "w")])
         #expect(await service.snapshot.meetings.map(\.meeting.id) == ["h", "w"])
 
         let model = try await model(service)
         #expect(model.scopedMeetings.map(\.meeting.id) == ["w"])
-        #expect(model.meetingsNeedingYou.map(\.meeting.id) == ["w"])
-        #expect(model.needsYouCount == 1)
+        #expect(model.needsYou.compactMap(\.meeting?.meeting.id) == ["w"])
+        #expect(model.attentionQueue.count == 1)
 
         // Switching changes the visible meetings at once, with no round trip.
         model.setActiveContext(.personal)
         #expect(model.scopedMeetings.map(\.meeting.id) == ["h"])
-        #expect(model.meetingsNeedingYou.map(\.meeting.id) == ["h"])
-        #expect(model.needsYouCount == 1)
+        #expect(model.needsYou.compactMap(\.meeting?.meeting.id) == ["h"])
+        #expect(model.attentionQueue.count == 1)
         #expect(!model.meetings.contains { $0.meeting.id == "o" })
     }
 
@@ -221,7 +221,7 @@ struct CalendarTests {
             clock.advance(minutes: 1)
         }
         // Not recorded as seen either: Professional decides that for itself.
-        #expect(!store.load().shownTransitions.contains { Meeting.isSubject($0.workstreamID) })
+        #expect(!store.load().shownTransitions.contains { $0.subjectID.isMeeting })
         #expect(store.load().notifications.isEmpty)
     }
 
@@ -231,10 +231,10 @@ struct CalendarTests {
         let store = InMemoryTernStore()
         let service = try await service(store, clock: clock, active: .personal)
         try await service.observeMeetings([Self.meeting("w", in: Self.work, startsIn: 10), Self.meeting("h", in: Self.home, startsIn: 10)])
-        #expect(store.load().notifications.map(\.workstreamID) == [Meeting.subjectID("h")])
+        #expect(store.load().notifications.map(\.subjectID) == [SubjectID(meeting: "h")])
 
         try await service.setActiveContext(.professional)
-        #expect(store.load().notifications.map(\.workstreamID) == [Meeting.subjectID("h"), Meeting.subjectID("w")])
+        #expect(store.load().notifications.map(\.subjectID) == [SubjectID(meeting: "h"), SubjectID(meeting: "w")])
 
         // Back and forth with nothing new: no duplicates.
         try await service.setActiveContext(.personal)
@@ -324,28 +324,29 @@ struct CalendarTests {
         let store = InMemoryTernStore()
         let service = try await service(store, clock: clock)
         try await service.observeMeetings([Self.meeting("m", in: Self.work, startsIn: 10)])
-        #expect(store.load().shownTransitions.contains { $0.workstreamID == Meeting.subjectID("m") })
+        #expect(store.load().shownTransitions.contains { $0.subjectID == SubjectID(meeting: "m") })
         clock.advance(minutes: 25 * 60)
         try await service.observeMeetings([Self.meeting("n", in: Self.work, startsIn: 25 * 60 + 10)])
-        #expect(!store.load().shownTransitions.contains { $0.workstreamID == Meeting.subjectID("m") })
+        #expect(!store.load().shownTransitions.contains { $0.subjectID == SubjectID(meeting: "m") })
     }
 
-    @Test("Calendar never changes workstream ranking or the workstream queue")
+    @Test("A meeting never changes any workstream's score or their order relative to each other")
     func workstreamPriorityUnchanged() async throws {
         let clock = TestClock(GH.t0)
         let service = try await service(clock: clock)
         try await service.setContext(.professional, forOwner: "makeplane")
         try await service.ingest(failingPR("makeplane/plane", 1) + failingPR("makeplane/plane", 2), mode: .historyImport)
         let model = try await model(service)
+        model.now = clock.now
         try await settle { model.workstreams.count == 2 }
-        let before = (model.attentionQueue.map(\.id), model.attentionQueue.map { model.priority(of: $0) })
+        let before = model.attentionQueue.compactMap(\.workstream).map { ($0.id, model.priority(of: $0)) }
 
         try await service.observeMeetings([Self.meeting("m", in: Self.work, startsIn: 10)])
-        try await settle { model.meetingsNeedingYou.count == 1 }
-        #expect(model.attentionQueue.map(\.id) == before.0)
-        #expect(model.attentionQueue.map { model.priority(of: $0) } == before.1)
-        #expect(model.needsYou.count == 2)
-        #expect(model.needsYouCount == 3)
+        try await settle { model.meetings.count == 1 }
+        let after = model.attentionQueue.compactMap(\.workstream).map { ($0.id, model.priority(of: $0)) }
+        #expect(after.map(\.0) == before.map(\.0))
+        #expect(after.map(\.1) == before.map(\.1))
+        #expect(model.attentionQueue.count == 3)
     }
 
     // MARK: Sync and permissions
@@ -457,8 +458,4 @@ struct CalendarTests {
         #expect(text(29.5) == "Starting now")
         #expect(text(33) == "Started 3 min ago")
     }
-}
-
-extension Meeting {
-    static func subjectID(_ id: String) -> WorkstreamID { WorkstreamID("calendar:\(id)") }
 }

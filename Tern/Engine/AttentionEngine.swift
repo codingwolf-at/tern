@@ -14,14 +14,13 @@ struct AttentionEngine: Sendable {
         resolver = OwnershipResolver(rules: rules)
     }
 
-    /// Re-derives a workstream's agent sessions, calendar context and evaluation from its history.
+    /// Re-derives a workstream's agent sessions and evaluation from its history.
     func rebuild(_ workstream: Workstream) -> Workstream {
         var updated = workstream
         updated.events.sort(by: WorkEvent.chronological)
         let (evaluation, facts) = replay(updated.events)
         updated.evaluation = evaluation
         updated.agentSessions = facts.orderedAgentRuns.map(Self.session)
-        updated.calendarContext = Self.calendarContext(from: updated.events)
         return updated
     }
 
@@ -77,14 +76,5 @@ struct AttentionEngine: Sendable {
             }
         }
         return AgentSession(id: run.sessionID, agentName: run.name, status: status, startedAt: run.started.at, updatedAt: run.updated.at)
-    }
-
-    /// Context only: calendar never feeds ownership or attention.
-    private static func calendarContext(from events: [WorkEvent]) -> CalendarContext? {
-        guard let meeting = events.last(where: { $0.kind == .calendarEventScheduled }),
-              let title = meeting[.title],
-              let startsAt = meeting[.startsAt].flatMap({ try? Date($0, strategy: .iso8601) })
-        else { return nil }
-        return CalendarContext(title: title, startsAt: startsAt)
     }
 }

@@ -57,7 +57,6 @@ extension WorkEventKind {
         case .agentStarted: "Agent started"
         case .agentCompleted: "Agent completed"
         case .agentFailed: "Agent failed"
-        case .calendarEventScheduled: "Meeting scheduled"
         default: rawValue
         }
     }
@@ -114,12 +113,5 @@ enum Age {
         case ..<(24 * 60): return "\(minutes / 60)h"
         default: return "\(minutes / (24 * 60))d"
         }
-    }
-
-    /// Compact time until a future date such as "in 45m".
-    static func until(_ date: Date, now: Date = .now) -> String {
-        let minutes = Int(date.timeIntervalSince(now) / 60)
-        guard minutes > 0 else { return "now" }
-        return minutes < 60 ? "in \(minutes)m" : "in \(minutes / 60)h"
     }
 }
