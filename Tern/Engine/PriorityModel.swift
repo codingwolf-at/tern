@@ -106,8 +106,11 @@ enum PriorityModel {
 
 extension Workstream {
     /// The repository this work lives in, as an importance key, when known.
+    /// The GitHub repository the work is in: its pull request's, otherwise the one an agent
+    /// session reported working in.
     var repositoryKey: String? {
-        pullRequest.map { RepositoryImportance.key(forRepository: $0.repository) }
+        if let pullRequest { return RepositoryImportance.key(forRepository: pullRequest.repository) }
+        return events.last { $0[.repository] != nil }?[.repository].map(RepositoryImportance.key(forRepository:))
     }
 
     /// Worth interrupting the user for: their move, at medium attention or above.

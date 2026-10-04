@@ -18,6 +18,9 @@ struct PersistedState: Hashable, Sendable, Codable {
     var completedImports: [String] = []
     /// How much each repository matters to the user (`github.com/owner/name` → importance).
     var repositoryImportance: [String: RepositoryImportance] = [:]
+    /// Which context the user is looking at, and which repositories belong to which context.
+    var activeContext: TernContext = .professional
+    var contextRules = ContextRules()
     /// The last transition surfaced to the user for each workstream.
     var shownTransitions: [ShownTransition] = []
     /// Most recent notifications, newest last.
@@ -27,7 +30,8 @@ struct PersistedState: Hashable, Sendable, Codable {
     static let unresolvedAssociationLimit = 50
 
     enum CodingKeys: String, CodingKey {
-        case version, workstreams, links, hints, unresolvedAssociations, completedImports, repositoryImportance, shownTransitions, notifications
+        case version, workstreams, links, hints, unresolvedAssociations, completedImports, repositoryImportance
+        case activeContext, contextRules, shownTransitions, notifications
     }
 
     init() {}
@@ -42,6 +46,8 @@ struct PersistedState: Hashable, Sendable, Codable {
         unresolvedAssociations = try container.decodeIfPresent([AssociationIssue].self, forKey: .unresolvedAssociations) ?? []
         completedImports = try container.decodeIfPresent([String].self, forKey: .completedImports) ?? []
         repositoryImportance = try container.decodeIfPresent([String: RepositoryImportance].self, forKey: .repositoryImportance) ?? [:]
+        activeContext = try container.decodeIfPresent(TernContext.self, forKey: .activeContext) ?? .professional
+        contextRules = try container.decodeIfPresent(ContextRules.self, forKey: .contextRules) ?? ContextRules()
         shownTransitions = try container.decode([ShownTransition].self, forKey: .shownTransitions)
         notifications = try container.decode([NotificationRecord].self, forKey: .notifications)
     }

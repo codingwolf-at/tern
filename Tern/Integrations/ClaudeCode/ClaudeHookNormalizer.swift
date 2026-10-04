@@ -68,6 +68,9 @@ enum ClaudeHookNormalizer {
 
         metadata[.agentName] = agentName
         metadata[.agentSessionID] = "\(provider):\(session)"
+        if let remote = payload.gitRemote, !remote.isEmpty {
+            metadata[.repository] = ExternalReference.gitHubRepository(remote).lowercased()
+        }
 
         let timestamp = payload.timestampMilliseconds
             .map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? receivedAt

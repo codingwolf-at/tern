@@ -26,6 +26,8 @@ final class ScenarioPlayer {
     /// opens on a fresh "back with you" transition.
     func seed() async {
         do {
+            // The mock's repository is work.
+            try await service.setContext(.professional, forOwner: ContextRules.owner(of: MockScenario.repository))
             try await scenario.seed(into: service, liveTail: 1)
             step = length - 1
             await stepForward()

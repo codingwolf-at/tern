@@ -144,6 +144,8 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let isDraft = MetadataKey(rawValue: "isDraft")
     static let headSHA = MetadataKey(rawValue: "headSHA")
     static let threadID = MetadataKey(rawValue: "threadID")
+    /// The GitHub repository the work happens in, `github.com/owner/name`.
+    static let repository = MetadataKey(rawValue: "repository")
     /// Pull request label name, as written on GitHub.
     static let label = MetadataKey(rawValue: "label")
     static let pullRequestNodeID = MetadataKey(rawValue: "pullRequestNodeID")

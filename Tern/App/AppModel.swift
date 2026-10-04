@@ -52,7 +52,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "github.importedLogins")
         let rules = WorkflowRules.load(from: .standard)
         #if DEBUG
-        let service = IngestionService(store: InMemoryTernStore(), rules: rules)
+        let service = IngestionService(store: InMemoryTernStore(), rules: rules, scopesByContext: true)
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
         return AppModel(
             service: service,
@@ -62,7 +62,7 @@ final class AppModel {
         )
         #else
         do {
-            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules)
+            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules, scopesByContext: true)
             return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
@@ -70,6 +70,43 @@ final class AppModel {
             return model
         }
         #endif
+    }
+
+    // MARK: - Context
+
+    private(set) var activeContext: TernContext = .professional
+    private(set) var contextRules = ContextRules()
+    /// Whether work is separated into personal and professional (always, in the app).
+    private(set) var isContextScoped = false
+
+    func context(of workstream: Workstream) -> WorkstreamContext {
+        contextRules.context(of: workstream)
+    }
+
+    /// The workstreams that take part in the active context. Every section, the ranking and the
+    /// badge are computed from these, so switching context recalculates everything.
+    var scoped: [Workstream] {
+        guard isContextScoped else { return workstreams }
+        return workstreams.filter { context(of: $0).isIn(activeContext) }
+    }
+
+    /// Open work that belongs to neither context yet, waiting for the user to classify it.
+    var unclassified: [Workstream] {
+        guard isContextScoped else { return [] }
+        return workstreams.filter { $0.state != .complete && context(of: $0) == .unclassified }
+    }
+
+    /// Switches context. The panel and badge update at once; the choice is saved.
+    func setActiveContext(_ context: TernContext) {
+        activeContext = context
+        Task { [service] in try? await service.setActiveContext(context) }
+    }
+
+    /// Classifies a GitHub owner's repositories, or with `repository`, just that one.
+    func setContext(_ context: TernContext?, forOwner owner: String? = nil, repository: String? = nil) {
+        if let owner { contextRules.set(context, forOwner: owner) }
+        if let repository { contextRules.set(context, forRepository: repository) }
+        Task { [service] in try? await service.setContext(context, forOwner: owner, repository: repository) }
     }
 
     // MARK: - Queue
@@ -97,7 +134,7 @@ final class AppModel {
 
     /// Everything that warrants an interruption, best first. Muted repositories never interrupt.
     var attentionQueue: [Workstream] {
-        ranked(workstreams.filter { $0.needsAttentionNow && importance(of: $0) != .muted })
+        ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) != .muted })
     }
 
     /// The few things worth dealing with now.
@@ -108,34 +145,34 @@ final class AppModel {
     /// Lower-priority items that would also warrant attention, kept out of the way.
     var more: [Workstream] {
         Array(attentionQueue.dropFirst(Self.needsYouLimit))
-            + ranked(workstreams.filter { $0.needsAttentionNow && importance(of: $0) == .muted })
+            + ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) == .muted })
     }
 
     /// Someone else (a reviewer, CI, an author) owes the next step.
     var waiting: [Workstream] {
-        ranked(workstreams.filter { [.reviewer, .ci, .external].contains($0.nextOwner) && $0.state != .complete })
+        ranked(scoped.filter { [.reviewer, .ci, .external].contains($0.nextOwner) && $0.state != .complete })
     }
 
     /// An agent is working on it right now.
     var active: [Workstream] {
-        ranked(workstreams.filter { $0.nextOwner == .agent && $0.state != .complete })
+        ranked(scoped.filter { $0.nextOwner == .agent && $0.state != .complete })
     }
 
     /// Yours, but nothing to interrupt for: drafts, PRs without reviewers, re-request nudges.
     var yourWork: [Workstream] {
-        ranked(workstreams.filter { $0.nextOwner == .me && !$0.needsAttentionNow && $0.state != .complete })
+        ranked(scoped.filter { $0.nextOwner == .me && !$0.needsAttentionNow && $0.state != .complete })
     }
 
     /// Open work nobody is moving: e.g. a Plane item with no pull request or session yet.
     var idle: [Workstream] {
-        ranked(workstreams.filter { $0.nextOwner == .none && $0.state != .complete })
+        ranked(scoped.filter { $0.nextOwner == .none && $0.state != .complete })
     }
 
     /// Finished today. Older completed work stays in history but out of the panel.
     var doneToday: [Workstream] {
         let calendar = Calendar.current
         let today = now()
-        return workstreams.filter { workstream in
+        return scoped.filter { workstream in
             guard workstream.state == .complete, let changed = workstream.lastMeaningfulChange else { return false }
             return calendar.isDate(changed, inSameDayAs: today)
         }
@@ -165,6 +202,9 @@ final class AppModel {
                 self.workstreams = snapshot.workstreams
                 self.unresolvedAssociations = snapshot.unresolvedAssociations
                 self.importance = snapshot.repositoryImportance
+                self.activeContext = snapshot.activeContext
+                self.contextRules = snapshot.contextRules
+                self.isContextScoped = snapshot.isContextScoped
             }
         }
     }

@@ -27,6 +27,11 @@ struct TernSnapshot: Hashable, Sendable {
     var notifications: [NotificationRecord] = []
     var unresolvedAssociations: [AssociationIssue] = []
     var repositoryImportance: [String: RepositoryImportance] = [:]
+    var activeContext: TernContext = .professional
+    var contextRules = ContextRules()
+    /// Whether the app separates personal and professional work. When `false` (e.g. most
+    /// engine tests), every workstream takes part and contexts are ignored.
+    var isContextScoped = false
 }
 
 enum IngestionError: Error {
@@ -46,6 +51,7 @@ actor IngestionService {
     private let continuation: AsyncStream<TernSnapshot>.Continuation
     private let store: any TernStore
     private let engine: AttentionEngine
+    private let isContextScoped: Bool
     private let now: @Sendable () -> Date
 
     private var isStarted = false
@@ -55,11 +61,15 @@ actor IngestionService {
     /// Evaluated workstreams, derived from `persisted`.
     private var workstreams: [WorkstreamID: Workstream] = [:]
 
-    /// - Parameter rules: the user's workflow rules. Changing them takes effect on the next
-    ///   launch, when every workstream is rebuilt from its events.
-    init(store: any TernStore, rules: WorkflowRules = .none, now: @escaping @Sendable () -> Date = { .now }) {
+    /// - Parameters:
+    ///   - rules: the user's workflow rules. Changing them takes effect on the next launch,
+    ///     when every workstream is rebuilt from its events.
+    ///   - scopesByContext: only the active context's work may notify (the app). Without it,
+    ///     contexts are ignored.
+    init(store: any TernStore, rules: WorkflowRules = .none, scopesByContext: Bool = false, now: @escaping @Sendable () -> Date = { .now }) {
         self.store = store
         self.engine = AttentionEngine(rules: rules)
+        self.isContextScoped = scopesByContext
         self.now = now
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
@@ -73,7 +83,10 @@ actor IngestionService {
             workstreams: persisted.workstreams.compactMap { workstreams[$0.id] },
             notifications: persisted.notifications,
             unresolvedAssociations: persisted.unresolvedAssociations,
-            repositoryImportance: persisted.repositoryImportance
+            repositoryImportance: persisted.repositoryImportance,
+            activeContext: persisted.activeContext,
+            contextRules: persisted.contextRules,
+            isContextScoped: isContextScoped
         )
     }
 
@@ -155,6 +168,31 @@ actor IngestionService {
         publish()
     }
 
+    /// Switches the context the user is looking at. Nothing is re-notified: the queue simply
+    /// shows the other context's work.
+    func setActiveContext(_ context: TernContext) throws {
+        guard isStarted else { throw IngestionError.notStarted }
+        guard persisted.activeContext != context else { return }
+        var next = persisted
+        next.activeContext = context
+        try store.save(next)
+        persisted = next
+        publish()
+    }
+
+    /// Says which context a GitHub owner's repositories (or with `repository`, one repository)
+    /// belong to. `nil` makes them unclassified again.
+    func setContext(_ context: TernContext?, forOwner owner: String? = nil, repository: String? = nil) throws {
+        guard isStarted else { throw IngestionError.notStarted }
+        var next = persisted
+        if let owner { next.contextRules.set(context, forOwner: owner) }
+        if let repository { next.contextRules.set(context, forRepository: repository) }
+        guard next.contextRules != persisted.contextRules else { return }
+        try store.save(next)
+        persisted = next
+        publish()
+    }
+
     /// Ingests a batch of events. Already-seen events are ignored; affected workstreams are
     /// re-evaluated once, and each is compared with what the user was last shown.
     @discardableResult
@@ -223,6 +261,12 @@ actor IngestionService {
         for id in touched {
             guard let record = next.workstreams.first(where: { $0.id == id }) else { continue }
             var workstream = rebuild(record)
+            rebuilt[id] = workstream
+            // Live work outside the active context is kept up to date but never shown, so it is
+            // neither notified nor recorded as seen: its own context decides that later.
+            if mode == .live, isContextScoped, !next.contextRules.context(of: workstream).isIn(next.activeContext) {
+                continue
+            }
             let transition = workstream.evaluation.transition
             let previous = next.shownTransitions.first { $0.workstreamID == id }
             let notify = mode == .live

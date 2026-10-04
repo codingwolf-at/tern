@@ -38,6 +38,9 @@ struct TernPanel: View {
                     if !model.idle.isEmpty {
                         compactSection("Idle", model.idle, symbol: "pause", detail: true)
                     }
+                    if !model.unclassified.isEmpty {
+                        unclassifiedSection
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
@@ -92,14 +95,77 @@ struct TernPanel: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Tern")
-                .font(.system(.title3, design: .rounded, weight: .semibold))
-            Spacer()
-            Text(summary)
-                .font(.callout)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Tern")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            if model.isContextScoped {
+                Picker("Context", selection: Binding(get: { model.activeContext }, set: { model.setActiveContext($0) })) {
+                    ForEach(TernContext.allCases, id: \.self) { context in
+                        Text(context.title.uppercased()).tag(context)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+            }
+        }
+    }
+
+    /// Work whose repository isn't classified yet. It takes part in neither context; one
+    /// right-click files the owner (or just the repository) under Personal or Professional.
+    private var unclassifiedSection: some View {
+        DisclosureGroup {
+            ForEach(model.unclassified) { workstream in
+                HStack(spacing: 8) {
+                    Image(systemName: "questionmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10)
+                    Text(workstream.repositoryKey.map { $0.replacingOccurrences(of: "github.com/", with: "") } ?? "No GitHub repository")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(workstream.title)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.vertical, 2)
+                .contextMenu { classifyMenu(for: workstream) }
+            }
+        } label: {
+            Text("UNCLASSIFIED · \(model.unclassified.count)")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.8)
                 .foregroundStyle(.secondary)
-                .contentTransition(.numericText())
+                .help("Not in Personal or Professional yet. Right-click to classify.")
+        }
+        .padding(.horizontal, 8)
+    }
+
+    @ViewBuilder
+    private func classifyMenu(for workstream: Workstream) -> some View {
+        if let repository = workstream.repositoryKey, let owner = ContextRules.owner(of: repository) {
+            let name = repository.replacingOccurrences(of: "github.com/", with: "")
+            Section("Everything from \(owner) is…") {
+                ForEach(TernContext.allCases, id: \.self) { context in
+                    Button(context.title) { model.setContext(context, forOwner: owner) }
+                }
+            }
+            Section("Only \(name) is…") {
+                ForEach(TernContext.allCases, id: \.self) { context in
+                    Button(context.title) { model.setContext(context, repository: repository) }
+                }
+            }
+        } else {
+            Text("Only work in a GitHub repository can be classified")
         }
     }
 
@@ -126,7 +192,10 @@ struct TernPanel: View {
                         isExpanded: expandedID == workstream.id,
                         toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id }
                     )
-                    .contextMenu { importanceMenu(for: workstream) }
+                    .contextMenu {
+                        importanceMenu(for: workstream)
+                        if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
+                    }
                 }
             }
         }
@@ -157,7 +226,10 @@ struct TernPanel: View {
                     }
                 }
                 .padding(.vertical, 2)
-                .contextMenu { importanceMenu(for: workstream) }
+                .contextMenu {
+                        importanceMenu(for: workstream)
+                        if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
+                    }
             }
         } label: {
             Text("\(title.uppercased()) · \(workstreams.count)")
