@@ -62,6 +62,11 @@ enum IngestionError: Error {
 actor IngestionService {
     /// Latest snapshot after every change. Intended for a single subscriber (the app model).
     nonisolated let updates: AsyncStream<TernSnapshot>
+    /// Notifications the policy decided to surface, in order, once their bookkeeping is saved.
+    /// Delivery (see `NotificationDelivery`) only decides whether macOS may show them. Buffered,
+    /// so anything surfaced before the app subscribes at launch isn't lost.
+    nonisolated let deliveries: AsyncStream<NotificationPayload>
+    private let deliveryContinuation: AsyncStream<NotificationPayload>.Continuation
 
     private let continuation: AsyncStream<TernSnapshot>.Continuation
     private let store: any TernStore
@@ -100,10 +105,12 @@ actor IngestionService {
         self.scoping = scoping
         self.now = now
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        (deliveries, deliveryContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(50))
     }
 
     deinit {
         continuation.finish()
+        deliveryContinuation.finish()
     }
 
     var snapshot: TernSnapshot {
@@ -206,12 +213,13 @@ actor IngestionService {
         next.activeContext = context
         // A meeting that became relevant while the user was away is surfaced once now, by the
         // same rules as any other transition; one already shown is not repeated.
-        var notifications: [NotificationRecord] = []
-        let statuses = evaluateMeetings(in: &next, notifications: &notifications)
+        var surfaced: [Surfaced] = []
+        let statuses = evaluateMeetings(in: &next, surfaced: &surfaced)
         try store.save(next)
         persisted = next
         meetingStatuses = statuses
         publish()
+        deliver(surfaced)
     }
 
     /// Says which context a GitHub owner's repositories (or with `repository`, one repository,
@@ -223,12 +231,13 @@ actor IngestionService {
         if let repository { next.contextRules.set(context, forRepository: repository) }
         if let calendar { next.contextRules.set(context, forCalendar: calendar) }
         guard next.contextRules != persisted.contextRules else { return }
-        var notifications: [NotificationRecord] = []
-        let statuses = evaluateMeetings(in: &next, notifications: &notifications)
+        var surfaced: [Surfaced] = []
+        let statuses = evaluateMeetings(in: &next, surfaced: &surfaced)
         try store.save(next)
         persisted = next
         meetingStatuses = statuses
         publish()
+        deliver(surfaced)
     }
 
     /// Takes the meetings Calendar currently reports and decides, through the same notification
@@ -241,7 +250,9 @@ actor IngestionService {
         var report = IngestReport()
         let previous = meetings
         meetings = observed.filter { persisted.contextRules.context(forCalendar: $0.calendarID) != .unclassified }
-        let statuses = evaluateMeetings(in: &next, notifications: &report.notifications)
+        var surfaced: [Surfaced] = []
+        let statuses = evaluateMeetings(in: &next, surfaced: &surfaced)
+        report.notifications = surfaced.map(\.record)
         if next != persisted {
             do {
                 try store.save(next)
@@ -255,6 +266,7 @@ actor IngestionService {
             meetingStatuses = statuses
             publish()
         }
+        deliver(surfaced)
         return report
     }
 
@@ -323,15 +335,19 @@ actor IngestionService {
 
         // Evaluate and decide what is new to the user.
         var rebuilt: [WorkstreamID: Workstream] = [:]
+        var surfaced: [Surfaced] = []
         for id in touched {
             guard let record = next.workstreams.first(where: { $0.id == id }) else { continue }
             var workstream = rebuild(record)
-            let notification = next.surface(workstream.evaluation.transition, of: workstream.subjectID,
-                                            in: next.contextRules.context(of: workstream), headline: workstream.status.headline,
-                                            mode: mode, isContextScoped: isContextScoped, at: now())
+            let context = next.contextRules.context(of: workstream)
+            let notification = next.surface(workstream.evaluation.transition, of: workstream.subjectID, in: context,
+                                            headline: workstream.status.headline, mode: mode, isContextScoped: isContextScoped, at: now())
             // A workstream's "New" marker lasts until it is next evaluated.
             workstream.evaluation.decision = workstream.evaluation.decision.with(shouldNotify: notification != nil)
-            if let notification { report.notifications.append(notification) }
+            if let notification {
+                report.notifications.append(notification)
+                surfaced.append((notification, NotificationContent.payload(for: workstream, record: notification, context: context)))
+            }
             rebuilt[id] = workstream
         }
 
@@ -343,6 +359,7 @@ actor IngestionService {
             seen = nextSeen
             workstreams.merge(rebuilt) { _, new in new }
             publish()
+            deliver(surfaced)
         }
         return report
     }
@@ -356,7 +373,7 @@ actor IngestionService {
     /// Evaluates the current meetings against `state` (its rules, active context and shown
     /// transitions) at `now()`, through the same `surface` path as workstreams. Meetings are
     /// always live: Calendar has no history to import.
-    private func evaluateMeetings(in state: inout PersistedState, notifications: inout [NotificationRecord]) -> [MeetingStatus] {
+    private func evaluateMeetings(in state: inout PersistedState, surfaced: inout [Surfaced]) -> [MeetingStatus] {
         let at = now()
         var statuses: [MeetingStatus] = []
         var included: Set<[String]> = []
@@ -374,7 +391,7 @@ actor IngestionService {
                 let subject = meeting.subjectID
                 if let notification = state.surface(status.transition, of: subject, in: context, headline: Self.meetingHeadline,
                                                     mode: .live, isContextScoped: isContextScoped, at: at) {
-                    notifications.append(notification)
+                    surfaced.append((notification, NotificationContent.payload(for: status, record: notification, at: at)))
                 }
                 // A meeting's "New" marker lasts while the transition it was surfaced for is current.
                 status.decision = status.decision.with(shouldNotify: state.wasNotified(status.transition, of: subject))
@@ -413,6 +430,14 @@ actor IngestionService {
 
     private func publish() {
         continuation.yield(snapshot)
+    }
+
+    /// A notification record with what its macOS notification would show.
+    private typealias Surfaced = (record: NotificationRecord, payload: NotificationPayload)
+
+    /// Hands surfaced notifications to delivery, only after their bookkeeping is saved.
+    private func deliver(_ surfaced: [Surfaced]) {
+        for item in surfaced { deliveryContinuation.yield(item.payload) }
     }
 
     private static func newWorkstreamID(for reference: ExternalReference) -> WorkstreamID {

@@ -90,8 +90,13 @@ struct TernPanel: View {
             if let calendar = model.calendar {
                 CalendarConnectionView(account: calendar, rules: model.contextRules) { model.setContext($0, forCalendar: $1) }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, model.notifications == nil ? 8 : 4)
                     .padding(.top, model.github == nil && model.plane == nil ? 8 : 0)
+            }
+            if let notifications = model.notifications {
+                NotificationConnectionView(delivery: notifications)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
             }
             Divider()
             footer
@@ -100,10 +105,22 @@ struct TernPanel: View {
         }
         .frame(width: 340)
         // Opening the panel re-reads Calendar: cheap, and it notices access granted in System Settings.
-        .onAppear { model.calendar?.refresh() }
+        .onAppear {
+            model.calendar?.refresh()
+            if let notifications = model.notifications { Task { await notifications.refresh() } }
+            showFocusedSubject()
+        }
+        .onChange(of: model.focusedSubject) { showFocusedSubject() }
         .animation(.snappy(duration: 0.2), value: model.workstreams)
         .animation(.snappy(duration: 0.2), value: model.meetings)
         .animation(.snappy(duration: 0.2), value: expandedID)
+    }
+
+    /// Expands the workstream a clicked notification was about. Meetings have no expanded view.
+    private func showFocusedSubject() {
+        guard let subject = model.focusedSubject else { return }
+        if let workstream = model.workstreams.first(where: { $0.subjectID == subject }) { expandedID = workstream.id }
+        model.focusedSubject = nil
     }
 
     private var header: some View {

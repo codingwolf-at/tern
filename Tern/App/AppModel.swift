@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 import Observation
 import os
+import UserNotifications
 
 /// UI-facing state. Mirrors snapshots published by `IngestionService` and groups
 /// workstreams by whose turn it is. It does not ingest or evaluate anything itself.
@@ -19,6 +21,12 @@ final class AppModel {
     let plane: PlaneAccount?
     /// Calendar access and classification; `nil` when Calendar isn't part of this model (tests).
     let calendar: CalendarAccount?
+    /// macOS notification permission and delivery; `nil` when not part of this model (tests).
+    let notifications: NotificationDelivery?
+    /// The subject a clicked notification was about; the panel expands it when shown.
+    var focusedSubject: SubjectID?
+    /// Kept alive here: the notification center holds its delegate weakly.
+    private var notificationResponder: NotificationResponder?
 
     #if DEBUG
     /// Present only when running the mock scenario.
@@ -38,12 +46,13 @@ final class AppModel {
 
     #if DEBUG
     init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, calendar: CalendarAccount? = nil,
-         scenarioPlayer: ScenarioPlayer? = nil) {
+         notifications: NotificationDelivery? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
         self.plane = plane
         self.calendar = calendar
+        self.notifications = notifications
         self.scenarioPlayer = scenarioPlayer
         let (stream, continuation) = AsyncStream<Change>.makeStream()
         changes = continuation
@@ -51,12 +60,14 @@ final class AppModel {
         observe()
     }
     #else
-    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, calendar: CalendarAccount? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, calendar: CalendarAccount? = nil,
+         notifications: NotificationDelivery? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
         self.plane = plane
         self.calendar = calendar
+        self.notifications = notifications
         let (stream, continuation) = AsyncStream<Change>.makeStream()
         changes = continuation
         applyChanges(from: stream)
@@ -86,13 +97,16 @@ final class AppModel {
             github: GitHubAccount(ingestion: service),
             plane: PlaneAccount(ingestion: service),
             calendar: CalendarAccount(ingestion: service),
+            notifications: NotificationDelivery(center: SystemNotificationCenter()),
             scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil
-        )
+        ).receivingNotificationClicks()
         #else
         do {
             let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules)
             return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service),
-                            calendar: CalendarAccount(ingestion: service))
+                            calendar: CalendarAccount(ingestion: service),
+                            notifications: NotificationDelivery(center: SystemNotificationCenter()))
+                .receivingNotificationClicks()
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
             model.report(error)
@@ -287,6 +301,49 @@ final class AppModel {
         while pendingChanges > 0 { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
+    // MARK: - Notifications
+
+    /// Hands every notification ingestion surfaces to macOS delivery, in order. Starts once
+    /// ingestion has loaded; anything surfaced earlier waits in the stream.
+    private func deliverNotifications() {
+        guard let notifications else { return }
+        Task { [service, notifications] in
+            await notifications.refresh()
+            for await payload in service.deliveries {
+                await notifications.deliver(payload)
+            }
+        }
+    }
+
+    /// Makes Tern the notification center's delegate, so clicks come back here. Only for the
+    /// app's own model; must happen before launch finishes to catch a click that launched Tern.
+    func receivingNotificationClicks() -> AppModel {
+        let responder = NotificationResponder { [weak self] response in self?.handle(response) }
+        notificationResponder = responder
+        UNUserNotificationCenter.current().delegate = responder
+        return self
+    }
+
+    /// A click brings Tern forward and points at the subject. Join opens the meeting's own link,
+    /// and only when the user chose Join. Neither changes the subject's state.
+    func handle(_ response: NotificationResponder.Response) {
+        switch response {
+        case .join(let subject):
+            if let url = meetings.first(where: { $0.meeting.subjectID == subject })?.meeting.joinURL {
+                NSWorkspace.shared.open(url)
+            } else {
+                focus(subject)
+            }
+        case .open(let subject):
+            focus(subject)
+        }
+    }
+
+    private func focus(_ subject: SubjectID) {
+        focusedSubject = subject
+        MenuBarPanel.open()
+    }
+
     // MARK: - Service
 
     private func observe() {
@@ -302,6 +359,7 @@ final class AppModel {
             #endif
             // Calendar reports into ingestion, so it starts only once ingestion is ready.
             await self?.calendar?.service.start()
+            self?.deliverNotifications()
             for await snapshot in service.updates {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams
