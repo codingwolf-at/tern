@@ -57,6 +57,7 @@ struct GitHubIndexPullRequest: Codable, Sendable, Hashable {
     let repository: Repository?
     let reviewRequests: GitHubCount?
     let statusCheckRollup: Rollup?
+    var labels: GitHubNodes<GitHubLabel>? = nil
 
     /// Changes whenever something Tern cares about may have changed.
     var fingerprint: String {
@@ -67,6 +68,7 @@ struct GitHubIndexPullRequest: Codable, Sendable, Hashable {
             state ?? "-",
             String(reviewRequests?.totalCount ?? -1),
             statusCheckRollup?.state ?? "-",
+            (labels?.items.map(\.name).sorted() ?? []).joined(separator: ","),
         ].joined(separator: "|")
     }
 }
@@ -167,10 +169,12 @@ struct GitHubPullRequest: Codable, Sendable, Hashable {
         let actor: GitHubActor?
         let requestedReviewer: GitHubRequestedReviewer?
         let review: ReviewReference?
+        /// Labeled and unlabeled events.
+        var label: GitHubLabel? = nil
 
         enum CodingKeys: String, CodingKey {
             case typename = "__typename"
-            case id, createdAt, actor, requestedReviewer, review
+            case id, createdAt, actor, requestedReviewer, review, label
         }
     }
 
@@ -239,4 +243,10 @@ struct GitHubPullRequest: Codable, Sendable, Hashable {
     let timelineItems: GitHubNodes<TimelineItem>
     let commits: GitHubNodes<CommitNode>
     let statusCheckRollup: Rollup?
+    /// Labels currently on the pull request.
+    var labels: GitHubNodes<GitHubLabel>? = nil
+}
+
+struct GitHubLabel: Codable, Sendable, Hashable {
+    let name: String
 }

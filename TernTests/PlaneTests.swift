@@ -503,7 +503,7 @@ struct CredentialIsolationTests {
                                    defaults: defaults, startSyncing: false, now: { PL.t0 })
 
         account.connect(workspace: "plane", token: "plane_api_valid_test_token")
-        for _ in 0..<300 where !(try store(.debug).token(for: "plane") != nil) { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<300 where defaults.data(forKey: "plane.workspace") == nil { try await Task.sleep(for: .milliseconds(10)) }
         #expect(try store(.debug).token(for: "plane") == "plane_api_valid_test_token")
 
         account.disconnect()

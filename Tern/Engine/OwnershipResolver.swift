@@ -13,7 +13,8 @@ import Foundation
 ///    Review and CI feedback count as handled while an agent turn that started after it is
 ///    in progress or has finished; a failed turn does not handle it. The user's own reviews,
 ///    comments and resolutions never create claims.
-/// 3. Externally blocked work is owned by `external`.
+/// 3. Externally blocked work is owned by `external`. So is a ready pull request that a workflow
+///    rule hands to someone else to merge (e.g. labeled "ready to merge" for a lead).
 /// 4. Otherwise the ball is with an agent, CI, reviewers, or (for someone else's pull
 ///    request) its author, in that order, and stays silent.
 /// 5. With nothing pending, an open PR or Plane item is a low-priority nudge for the user.
@@ -23,6 +24,8 @@ import Foundation
 /// `AttentionTransition` stable across replays.
 struct OwnershipResolver: Sendable {
     typealias Stamp = WorkstreamFacts.Stamp
+
+    var rules: WorkflowRules = .none
 
     struct Resolution: Hashable, Sendable {
         let state: WorkstreamState
@@ -89,6 +92,11 @@ struct OwnershipResolver: Sendable {
         if pr.role == .reviewer, let opened = pr.opened {
             let author = pr.author.map { "With \($0)" } ?? "With the author"
             return waiting(on: .external, state: .waiting, StatusLine(headline: author, focus: .github), opened)
+        }
+        if pr.role == .author, let ready = mergeReadiness(facts), let handOff = rules.mergeHandOff(in: pr) {
+            let since = Stamp.isOrderedBefore(ready.approved, handOff.since) ? handOff.since : ready.approved
+            let status = StatusLine(headline: "Waiting for \(handOff.rule.mergedBy) to merge", detail: "Labeled \u{201C}\(handOff.rule.label)\u{201D}", focus: .github)
+            return waiting(on: .external, state: .waiting, status, since)
         }
         if case .running(let pending, let total, let stamp) = pr.ci {
             let detail = total > 1 ? "\(pending) of \(total) checks pending" : nil
@@ -256,28 +264,21 @@ struct OwnershipResolver: Sendable {
             ))
         }
 
-        // Merge only on evidence about the code as it is now: approvals on the current head,
-        // CI green or absent, nothing outstanding, and no agent still changing the branch.
+        // A ready pull request is the user's to merge, unless a workflow rule hands it to someone else.
         let approvals = pr.reviewers.filter { $0.value.verdict == .approved }
-        let current = approvals.filter { pr.isCurrent($0.value) }
         let agentActive = facts.agentRuns.values.contains(where: \.isInProgress)
-        if let approved = current.compactMap(\.value.verdictStamp).max(by: Stamp.isOrderedBefore),
-           !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !pr.isDraft, !agentActive {
-            switch pr.ci {
-            case .unknown, .passed:
-                let names = current.keys.sorted().joined(separator: ", ")
+        if let ready = mergeReadiness(facts) {
+            if rules.mergeHandOff(in: pr) == nil {
                 claims.append(Claim(
                     attention: .medium,
                     reason: .approvedReadyToMerge,
-                    cause: approved,
-                    action: NextAction(title: "Merge", reason: "\(names) approved the current head", estimatedMinutes: 2),
+                    cause: ready.approved,
+                    action: NextAction(title: "Merge", reason: "\(ready.approvers) approved the current head", estimatedMinutes: 2),
                     status: StatusLine(headline: "Approved", detail: "Ready to merge", focus: .github)
                 ))
-            case .running, .failed:
-                break
             }
-        } else if current.isEmpty, !approvals.isEmpty, !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !agentActive,
-                  let push = pr.lastPush {
+        } else if !approvals.contains(where: { pr.isCurrent($0.value) }), !approvals.isEmpty, !hasOutstandingChanges,
+                  pr.pendingReviewers.isEmpty, !agentActive, let push = pr.lastPush {
             let names = approvals.keys.sorted().joined(separator: ", ")
             claims.append(Claim(
                 attention: .low,
@@ -298,6 +299,23 @@ struct OwnershipResolver: Sendable {
             ))
         }
         return claims
+    }
+
+    /// The user's pull request can be merged, judged only on evidence about the code as it is now:
+    /// approvals on the current head, CI green or absent, no outstanding change requests or
+    /// review requests, not a draft, and no agent still changing the branch.
+    private func mergeReadiness(_ facts: WorkstreamFacts) -> (approved: Stamp, approvers: String)? {
+        let pr = facts.pullRequest
+        let current = pr.reviewers.filter { $0.value.verdict == .approved && pr.isCurrent($0.value) }
+        let hasOutstandingChanges = pr.reviewers.values.contains { if case .changesRequested = $0.verdict { true } else { false } }
+        guard let approved = current.compactMap(\.value.verdictStamp).max(by: Stamp.isOrderedBefore),
+              !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !pr.isDraft,
+              !facts.agentRuns.values.contains(where: \.isInProgress)
+        else { return nil }
+        switch pr.ci {
+        case .unknown, .passed: return (approved, current.keys.sorted().joined(separator: ", "))
+        case .running, .failed: return nil
+        }
     }
 
     /// Claims on someone else's pull request: only an outstanding request for my review.

@@ -9,8 +9,9 @@ import Foundation
 /// | Source                       | Event ID                                        |
 /// |------------------------------|-------------------------------------------------|
 /// | Pull request                 | `github:pr:<repo-id>:<number>:opened`           |
-/// | Timeline (requests, draft, merge, close, reopen, dismissal) | `github:timeline:<node-id>` |
+/// | Timeline (requests, draft, merge, close, reopen, dismissal, labels) | `github:timeline:<node-id>` |
 /// | Pending request not in timeline | `github:pr:<repo-id>:<number>:pending-request:<reviewer>` |
+/// | Label applied before the timeline window | `github:pr:<repo-id>:<number>:label:<name>` |
 /// | Review                       | `github:review:<review-id>`                     |
 /// | Review thread comment        | `github:comment:<comment-id>`                   |
 /// | Thread resolution            | `github:thread:<thread-id>:resolved:<last-comment-id>` |
@@ -57,6 +58,7 @@ struct GitHubNormalizer: Sendable {
 
         // Timeline transitions.
         var timelineRequests: Set<String> = []
+        var timelineLabels: Set<String> = []
         for item in pr.timelineItems.items {
             guard let id = item.id, let at = item.createdAt else { continue }
             let eventID = EventID(.github, "timeline", id)
@@ -84,6 +86,11 @@ struct GitHubNormalizer: Sendable {
             case "ReviewDismissedEvent":
                 let reviewer = pr.reviews.items.first { $0.databaseId == item.review?.databaseId }?.author?.login
                 events.append(context.event(eventID, .reviewDismissed, at: at, actor: item.actor?.login, [.reviewer: reviewer ?? "reviewer"]))
+            case "LabeledEvent", "UnlabeledEvent":
+                guard let label = item.label?.name else { continue }
+                timelineLabels.insert(label.lowercased())
+                let kind: WorkEventKind = item.typename == "LabeledEvent" ? .pullRequestLabeled : .pullRequestUnlabeled
+                events.append(context.event(eventID, kind, at: at, actor: item.actor?.login, [.label: label]))
             default:
                 continue
             }
@@ -98,6 +105,17 @@ struct GitHubNormalizer: Sendable {
                 at: pr.createdAt,
                 actor: pr.author?.login,
                 [.reviewer: key, .reviewerIsMe: String(context.reviewerIsMe(reviewer))]
+            ))
+        }
+
+        // Labels applied before the timeline window.
+        for label in pr.labels?.items ?? [] where !timelineLabels.contains(label.name.lowercased()) {
+            events.append(context.event(
+                EventID(.github, "pr", context.repoID, String(pr.number), "label", label.name.lowercased()),
+                .pullRequestLabeled,
+                at: pr.createdAt,
+                actor: pr.author?.login,
+                [.label: label.name]
             ))
         }
 

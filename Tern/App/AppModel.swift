@@ -50,8 +50,9 @@ final class AppModel {
     static func makeDefault() -> AppModel {
         // Import progress now lives in the persisted state; drop the old build-shared marker.
         UserDefaults.standard.removeObject(forKey: "github.importedLogins")
+        let rules = WorkflowRules.load(from: .standard)
         #if DEBUG
-        let service = IngestionService(store: InMemoryTernStore())
+        let service = IngestionService(store: InMemoryTernStore(), rules: rules)
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
         return AppModel(
             service: service,
@@ -61,7 +62,7 @@ final class AppModel {
         )
         #else
         do {
-            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()))
+            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules)
             return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))

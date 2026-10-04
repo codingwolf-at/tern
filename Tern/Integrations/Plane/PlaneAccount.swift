@@ -100,7 +100,9 @@ final class PlaneAccount {
 
     /// Removes the token and workspace. Synced workstreams stay.
     func disconnect() {
-        let workspace = sync.workspace
+        // The saved workspace is authoritative; sync status can lag right after connecting.
+        let saved = defaults.data(forKey: Self.workspaceKey).flatMap { try? JSONDecoder().decode(PlaneWorkspace.self, from: $0) }
+        let workspace = saved?.slug ?? sync.workspace
         Task { [service, credentials] in
             await service.stop()
             await service.forgetImport()

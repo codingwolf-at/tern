@@ -48,6 +48,11 @@ struct PullRequestFacts: Hashable, Sendable {
         let stamp: Stamp
     }
 
+    struct LabelChange: Hashable, Sendable {
+        let isApplied: Bool
+        let stamp: Stamp
+    }
+
     enum CIState: Hashable, Sendable {
         case unknown
         case running(pending: Int, total: Int, Stamp)
@@ -71,6 +76,8 @@ struct PullRequestFacts: Hashable, Sendable {
     var headSHA: String?
     /// Checks keyed by name; a re-run replaces the earlier result.
     var checks: [String: Check] = [:]
+    /// The latest change per label, keyed by lowercased name.
+    var labelChanges: [String: LabelChange] = [:]
 
     /// Applies a GitHub-style event. Returns `false` for kinds it doesn't handle.
     mutating func apply(_ event: WorkEvent, stamp: Stamp) -> Bool {
@@ -144,6 +151,10 @@ struct PullRequestFacts: Hashable, Sendable {
                 lastPush = stamp
                 myLastActivity = stamp
             }
+        case .pullRequestLabeled, .pullRequestUnlabeled:
+            guard let label = event[.label]?.lowercased() else { break }
+            if let existing = labelChanges[label], Stamp.isOrderedBefore(stamp, existing.stamp) { break }
+            labelChanges[label] = LabelChange(isApplied: event.kind == .pullRequestLabeled, stamp: stamp)
         case .ciStarted, .ciPassed, .ciFailed:
             let name = event[.checkName] ?? "ci"
             let status: Check.Status = switch event.kind {
@@ -157,6 +168,12 @@ struct PullRequestFacts: Hashable, Sendable {
             return false
         }
         return true
+    }
+
+    /// When a label (matched case-insensitively) was put on the pull request, if it's on now.
+    func labelApplied(_ name: String) -> Stamp? {
+        guard let change = labelChanges[name.lowercased()], change.isApplied else { return nil }
+        return change.stamp
     }
 
     /// Checks for the current head commit. Checks from older commits no longer count.

@@ -71,6 +71,8 @@ extension WorkEventKind {
     static let ciFailed = WorkEventKind(rawValue: "github.ci.failed")
     static let pullRequestMerged = WorkEventKind(rawValue: "github.pr.merged")
     static let pullRequestClosed = WorkEventKind(rawValue: "github.pr.closed")
+    static let pullRequestLabeled = WorkEventKind(rawValue: "github.pr.labeled")
+    static let pullRequestUnlabeled = WorkEventKind(rawValue: "github.pr.unlabeled")
 
     // Agents. A session hosts many turns: `agentStarted` begins a turn, `agentCompleted`
     // and `agentFailed` end one, and the session itself stays open until `agentSessionEnded`.
@@ -142,6 +144,8 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let isDraft = MetadataKey(rawValue: "isDraft")
     static let headSHA = MetadataKey(rawValue: "headSHA")
     static let threadID = MetadataKey(rawValue: "threadID")
+    /// Pull request label name, as written on GitHub.
+    static let label = MetadataKey(rawValue: "label")
     static let pullRequestNodeID = MetadataKey(rawValue: "pullRequestNodeID")
     static let planeItemID = MetadataKey(rawValue: "planeItemID")
     static let stateName = MetadataKey(rawValue: "stateName")

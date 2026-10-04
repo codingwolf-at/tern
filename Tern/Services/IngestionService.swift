@@ -45,7 +45,7 @@ actor IngestionService {
 
     private let continuation: AsyncStream<TernSnapshot>.Continuation
     private let store: any TernStore
-    private let engine = AttentionEngine()
+    private let engine: AttentionEngine
     private let now: @Sendable () -> Date
 
     private var isStarted = false
@@ -55,8 +55,11 @@ actor IngestionService {
     /// Evaluated workstreams, derived from `persisted`.
     private var workstreams: [WorkstreamID: Workstream] = [:]
 
-    init(store: any TernStore, now: @escaping @Sendable () -> Date = { .now }) {
+    /// - Parameter rules: the user's workflow rules. Changing them takes effect on the next
+    ///   launch, when every workstream is rebuilt from its events.
+    init(store: any TernStore, rules: WorkflowRules = .none, now: @escaping @Sendable () -> Date = { .now }) {
         self.store = store
+        self.engine = AttentionEngine(rules: rules)
         self.now = now
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }

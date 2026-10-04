@@ -22,6 +22,7 @@ enum GitHubQueries {
       repository { nameWithOwner }
       reviewRequests { totalCount }
       statusCheckRollup { state }
+      labels(first: 20) { nodes { name } }
     }
     """
 
@@ -47,6 +48,7 @@ enum GitHubQueries {
       headRefName headRefOid baseRefName
       repository { databaseId nameWithOwner }
       headRepository { nameWithOwner }
+      labels(first: 20) { nodes { name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ...TernReviewer } } }
       reviews(last: 30) { nodes { databaseId state submittedAt author { ...TernActor } commit { oid } } }
       reviewThreads(last: 30) {
@@ -57,7 +59,7 @@ enum GitHubQueries {
         }
       }
       comments(last: 20) { nodes { databaseId createdAt author { ...TernActor } } }
-      timelineItems(last: 50, itemTypes: [REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, REVIEW_DISMISSED_EVENT]) {
+      timelineItems(last: 50, itemTypes: [REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, REVIEW_DISMISSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]) {
         nodes {
           __typename
           ... on ReviewRequestedEvent { id createdAt actor { ...TernActor } requestedReviewer { ...TernReviewer } }
@@ -68,6 +70,8 @@ enum GitHubQueries {
           ... on ClosedEvent { id createdAt actor { ...TernActor } }
           ... on ReopenedEvent { id createdAt actor { ...TernActor } }
           ... on ReviewDismissedEvent { id createdAt actor { ...TernActor } review { databaseId } }
+          ... on LabeledEvent { id createdAt actor { ...TernActor } label { name } }
+          ... on UnlabeledEvent { id createdAt actor { ...TernActor } label { name } }
         }
       }
       commits(last: 1) { nodes { commit { oid committedDate author { user { login } } } } }

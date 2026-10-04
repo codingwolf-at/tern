@@ -8,7 +8,11 @@ import Foundation
 /// that depends on what the user has already been shown (see `NotificationPolicy`), so
 /// every decision it returns has `shouldNotify == false`.
 struct AttentionEngine: Sendable {
-    private let resolver = OwnershipResolver()
+    private let resolver: OwnershipResolver
+
+    init(rules: WorkflowRules = .none) {
+        resolver = OwnershipResolver(rules: rules)
+    }
 
     /// Re-derives a workstream's agent sessions, calendar context and evaluation from its history.
     func rebuild(_ workstream: Workstream) -> Workstream {
