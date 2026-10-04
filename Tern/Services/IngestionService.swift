@@ -29,6 +29,9 @@ struct TernSnapshot: Hashable, Sendable {
     var repositoryImportance: [String: RepositoryImportance] = [:]
     var activeContext: TernContext = .professional
     var contextRules = ContextRules()
+    /// Meetings from classified calendars, both contexts, evaluated at the last refresh. Never
+    /// persisted. Unclassified calendars' meetings are never here.
+    var meetings: [MeetingStatus] = []
     /// Whether work is limited to the active context. Always in the app; only Debug-built
     /// tests can turn it off (see `ContextScoping.ignoringContexts`).
     var isContextScoped = true
@@ -66,6 +69,7 @@ actor IngestionService {
     private let scoping: ContextScoping
     private var isContextScoped: Bool { scoping == .activeContext }
     private let now: @Sendable () -> Date
+    private let meetingPolicy: MeetingPolicy
 
     private var isStarted = false
     private var persisted = PersistedState()
@@ -73,6 +77,10 @@ actor IngestionService {
     private var resolver = WorkstreamResolver()
     /// Evaluated workstreams, derived from `persisted`.
     private var workstreams: [WorkstreamID: Workstream] = [:]
+    /// The meetings Calendar last reported, and what they mean right now. In memory only:
+    /// after a restart they are read from Calendar again.
+    private var meetings: [Meeting] = []
+    private var meetingStatuses: [MeetingStatus] = []
 
     /// - Parameters:
     ///   - rules: the user's workflow rules. Changing them takes effect on the next launch,
@@ -83,9 +91,11 @@ actor IngestionService {
         store: any TernStore,
         rules: WorkflowRules = .none,
         now: @escaping @Sendable () -> Date = { .now },
-        scoping: ContextScoping = .activeContext
+        scoping: ContextScoping = .activeContext,
+        meetingPolicy: MeetingPolicy = .standard
     ) {
         self.store = store
+        self.meetingPolicy = meetingPolicy
         self.engine = AttentionEngine(rules: rules)
         self.scoping = scoping
         self.now = now
@@ -104,6 +114,7 @@ actor IngestionService {
             repositoryImportance: persisted.repositoryImportance,
             activeContext: persisted.activeContext,
             contextRules: persisted.contextRules,
+            meetings: meetingStatuses,
             isContextScoped: isContextScoped
         )
     }
@@ -186,29 +197,65 @@ actor IngestionService {
         publish()
     }
 
-    /// Switches the context the user is looking at. Nothing is re-notified: the queue simply
-    /// shows the other context's work.
+    /// Switches the context the user is looking at. No workstream is re-notified: the queue
+    /// simply shows the other context's work.
     func setActiveContext(_ context: TernContext) throws {
         guard isStarted else { throw IngestionError.notStarted }
         guard persisted.activeContext != context else { return }
         var next = persisted
         next.activeContext = context
+        // A meeting that became relevant while the user was away is surfaced once now, by the
+        // same rules as any other transition; one already shown is not repeated.
+        var notifications: [NotificationRecord] = []
+        let statuses = evaluateMeetings(in: &next, notifications: &notifications)
         try store.save(next)
         persisted = next
+        meetingStatuses = statuses
         publish()
     }
 
-    /// Says which context a GitHub owner's repositories (or with `repository`, one repository)
-    /// belong to. `nil` makes them unclassified again.
-    func setContext(_ context: TernContext?, forOwner owner: String? = nil, repository: String? = nil) throws {
+    /// Says which context a GitHub owner's repositories (or with `repository`, one repository,
+    /// or with `calendar`, one macOS calendar) belong to. `nil` makes them unclassified again.
+    func setContext(_ context: TernContext?, forOwner owner: String? = nil, repository: String? = nil, calendar: String? = nil) throws {
         guard isStarted else { throw IngestionError.notStarted }
         var next = persisted
         if let owner { next.contextRules.set(context, forOwner: owner) }
         if let repository { next.contextRules.set(context, forRepository: repository) }
+        if let calendar { next.contextRules.set(context, forCalendar: calendar) }
         guard next.contextRules != persisted.contextRules else { return }
+        var notifications: [NotificationRecord] = []
+        let statuses = evaluateMeetings(in: &next, notifications: &notifications)
         try store.save(next)
         persisted = next
+        meetingStatuses = statuses
         publish()
+    }
+
+    /// Takes the meetings Calendar currently reports and decides, through the same notification
+    /// policy and shown-transition bookkeeping as workstreams, whether any is news. Repeating
+    /// the same meetings is a no-op; only meetings from classified calendars are kept.
+    @discardableResult
+    func observeMeetings(_ observed: [Meeting]) throws -> IngestReport {
+        guard isStarted else { throw IngestionError.notStarted }
+        var next = persisted
+        var report = IngestReport()
+        let previous = meetings
+        meetings = observed.filter { persisted.contextRules.context(forCalendar: $0.calendarID) != .unclassified }
+        let statuses = evaluateMeetings(in: &next, notifications: &report.notifications)
+        if next != persisted {
+            do {
+                try store.save(next)
+            } catch {
+                meetings = previous
+                throw error
+            }
+            persisted = next
+        }
+        if statuses != meetingStatuses || !report.notifications.isEmpty {
+            meetingStatuses = statuses
+            publish()
+        }
+        return report
     }
 
     /// Ingests a batch of events. Already-seen events are ignored; affected workstreams are
@@ -321,6 +368,57 @@ actor IngestionService {
             publish()
         }
         return report
+    }
+
+    // MARK: - Meetings
+
+    /// How long a meeting's shown transition is kept after it was surfaced.
+    static let meetingBookkeepingRetention: TimeInterval = 24 * 60 * 60
+    static let meetingHeadline = "Meeting starting soon"
+
+    /// Evaluates the current meetings against `state` (its rules, active context and shown
+    /// transitions) at `now()`. Mirrors the workstream path in `ingest`: work outside the active
+    /// context is evaluated but neither notified nor recorded as seen.
+    private func evaluateMeetings(in state: inout PersistedState, notifications: inout [NotificationRecord]) -> [MeetingStatus] {
+        let at = now()
+        var statuses: [MeetingStatus] = []
+        for meeting in meetings.sorted(by: { ($0.startsAt, $0.id) < ($1.startsAt, $1.id) }) {
+            let context = state.contextRules.context(forCalendar: meeting.calendarID)
+            guard context != .unclassified else { continue }
+            var status = MeetingEvaluator.evaluate(meeting, context: context, at: at, policy: meetingPolicy)
+            guard status.phase != .ended else { continue }
+            defer { statuses.append(status) }
+            guard !isContextScoped || context.isIn(state.activeContext) else { continue }
+            // Only attention-claiming transitions are bookkept; a quiet upcoming meeting has nothing to remember.
+            guard status.needsAttentionNow else { continue }
+
+            let id = meeting.subjectID
+            let transition = status.transition
+            let previous = state.shownTransitions.first { $0.workstreamID == id }
+            let notify = NotificationPolicy.shouldNotify(transition, lastShown: previous?.transition)
+                && !(previous?.seen.contains(transition.fingerprint) ?? false)
+            if previous?.transition != transition {
+                let seen = ((previous?.seen ?? []).filter { $0 != transition.fingerprint } + [transition.fingerprint]).suffix(ShownTransition.seenLimit)
+                state.shownTransitions.removeAll { $0.workstreamID == id }
+                state.shownTransitions.append(ShownTransition(workstreamID: id, transition: transition, seen: Array(seen)))
+            }
+            if notify {
+                let record = NotificationRecord(workstreamID: id, fingerprint: transition.fingerprint, headline: Self.meetingHeadline,
+                                                attention: transition.attention, createdAt: at)
+                state.notifications.append(record)
+                notifications.append(record)
+            }
+            // "New" stays while the surfaced transition is the current one.
+            let surfaced = state.notifications.contains { $0.workstreamID == id && $0.fingerprint == transition.fingerprint }
+            status.decision = status.decision.with(shouldNotify: surfaced)
+        }
+        state.notifications = Array(state.notifications.suffix(PersistedState.notificationHistoryLimit))
+        // Forget meetings surfaced long ago, so bookkeeping doesn't grow with every meeting.
+        state.shownTransitions.removeAll { shown in
+            guard Meeting.isSubject(shown.workstreamID), let causeAt = shown.transition.causeAt else { return false }
+            return at.timeIntervalSince(causeAt) > Self.meetingBookkeepingRetention
+        }
+        return statuses
     }
 
     // MARK: - Helpers

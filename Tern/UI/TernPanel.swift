@@ -20,7 +20,10 @@ struct TernPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    section("Needs you", model.needsYou, empty: "Nothing needs you right now.")
+                    section("Needs you", model.needsYou, meetings: model.meetingsNeedingYou, empty: "Nothing needs you right now.")
+                    if model.upNext != nil || model.meetingInProgress != nil {
+                        upNextSection
+                    }
                     if !model.more.isEmpty {
                         compactSection("More", model.more, symbol: "circle.fill", detail: true)
                     }
@@ -81,8 +84,14 @@ struct TernPanel: View {
             if let plane = model.plane {
                 PlaneConnectionView(account: plane)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, model.calendar == nil ? 8 : 4)
                     .padding(.top, model.github == nil ? 8 : 0)
+            }
+            if let calendar = model.calendar {
+                CalendarConnectionView(account: calendar, rules: model.contextRules) { model.setContext($0, forCalendar: $1) }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .padding(.top, model.github == nil && model.plane == nil ? 8 : 0)
             }
             Divider()
             footer
@@ -91,6 +100,7 @@ struct TernPanel: View {
         }
         .frame(width: 340)
         .animation(.snappy(duration: 0.2), value: model.workstreams)
+        .animation(.snappy(duration: 0.2), value: model.meetings)
         .animation(.snappy(duration: 0.2), value: expandedID)
     }
 
@@ -185,16 +195,34 @@ struct TernPanel: View {
     }
 
     private var summary: String {
-        let count = model.attentionQueue.count
+        let count = model.needsYouCount
         return count == 0 ? "All quiet" : "\(count) need\(count == 1 ? "s" : "") you"
     }
 
+    /// The next meeting, and one under way, quietly. Not an agenda: at most one of each.
+    private var upNextSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            SectionHeader(title: "Up next")
+            if let meeting = model.meetingInProgress {
+                MeetingRow(status: meeting)
+            }
+            if let meeting = model.upNext {
+                MeetingRow(status: meeting)
+            }
+        }
+    }
+
+    /// Meetings about to start come first: they're time-bound and gone in minutes. Workstreams
+    /// keep their own ranking below them.
     @ViewBuilder
-    private func section(_ title: String, _ workstreams: [Workstream], empty: String?) -> some View {
-        if !workstreams.isEmpty || empty != nil {
+    private func section(_ title: String, _ workstreams: [Workstream], meetings: [MeetingStatus] = [], empty: String?) -> some View {
+        if !workstreams.isEmpty || !meetings.isEmpty || empty != nil {
             VStack(alignment: .leading, spacing: 2) {
                 SectionHeader(title: title)
-                if workstreams.isEmpty, let empty {
+                ForEach(meetings) { meeting in
+                    MeetingRow(status: meeting)
+                }
+                if workstreams.isEmpty, meetings.isEmpty, let empty {
                     Text(empty)
                         .font(.callout)
                         .foregroundStyle(.secondary)

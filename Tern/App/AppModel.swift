@@ -17,6 +17,8 @@ final class AppModel {
     let github: GitHubAccount?
     /// Plane connection and sync status; `nil` when Plane isn't part of this model (tests).
     let plane: PlaneAccount?
+    /// Calendar access and classification; `nil` when Calendar isn't part of this model (tests).
+    let calendar: CalendarAccount?
 
     #if DEBUG
     /// Present only when running the mock scenario.
@@ -35,11 +37,13 @@ final class AppModel {
     private var pendingChanges = 0
 
     #if DEBUG
-    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, calendar: CalendarAccount? = nil,
+         scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
         self.plane = plane
+        self.calendar = calendar
         self.scenarioPlayer = scenarioPlayer
         let (stream, continuation) = AsyncStream<Change>.makeStream()
         changes = continuation
@@ -47,11 +51,12 @@ final class AppModel {
         observe()
     }
     #else
-    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, calendar: CalendarAccount? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
         self.plane = plane
+        self.calendar = calendar
         let (stream, continuation) = AsyncStream<Change>.makeStream()
         changes = continuation
         applyChanges(from: stream)
@@ -72,12 +77,14 @@ final class AppModel {
             service: service,
             github: GitHubAccount(ingestion: service),
             plane: PlaneAccount(ingestion: service),
+            calendar: CalendarAccount(ingestion: service),
             scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil
         )
         #else
         do {
             let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules)
-            return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service))
+            return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service),
+                            calendar: CalendarAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
             model.report(error)
@@ -123,6 +130,48 @@ final class AppModel {
         if let owner { contextRules.set(context, forOwner: owner) }
         if let repository { contextRules.set(context, forRepository: repository) }
         save { try await $0.setContext(context, forOwner: owner, repository: repository) }
+    }
+
+    /// Files a macOS calendar under Personal or Professional; `nil` makes it unclassified. Its
+    /// meetings move at once, and Calendar is read again so a newly classified one appears.
+    func setContext(_ context: TernContext?, forCalendar calendarID: String) {
+        contextRules.set(context, forCalendar: calendarID)
+        let sync = calendar?.service
+        save { service in
+            try await service.setContext(context, calendar: calendarID)
+            await sync?.refresh()
+        }
+    }
+
+    // MARK: - Meetings
+
+    /// Meetings from classified calendars, both contexts, as of the last Calendar refresh.
+    private(set) var meetings: [MeetingStatus] = []
+
+    /// The active context's meetings. Unclassified calendars never get this far.
+    var scopedMeetings: [MeetingStatus] {
+        guard isContextScoped else { return meetings }
+        return meetings.filter { contextRules.context(forCalendar: $0.meeting.calendarID).isIn(activeContext) }
+    }
+
+    /// Meetings inside their preparation window: they need the user now.
+    var meetingsNeedingYou: [MeetingStatus] {
+        scopedMeetings.filter(\.needsAttentionNow)
+    }
+
+    /// The next meeting that will claim attention, once it is close. One, not an agenda.
+    var upNext: MeetingStatus? {
+        scopedMeetings.first { $0.phase == .upcoming && MeetingEvaluator.canClaimAttention($0.meeting) }
+    }
+
+    /// A meeting under way, kept quietly so it can still be joined. Gone once it ends.
+    var meetingInProgress: MeetingStatus? {
+        scopedMeetings.first { $0.phase == .inProgress && MeetingEvaluator.canClaimAttention($0.meeting) }
+    }
+
+    /// The badge: workstreams that need the user plus meetings about to start.
+    var needsYouCount: Int {
+        attentionQueue.count + meetingsNeedingYou.count
     }
 
     // MARK: - Queue
@@ -240,10 +289,13 @@ final class AppModel {
             #if DEBUG
             await self?.scenarioPlayer?.seed()
             #endif
+            // Calendar may have been read before ingestion was ready; read it again now.
+            await self?.calendar?.service.refresh()
             for await snapshot in service.updates {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams
                 self.unresolvedAssociations = snapshot.unresolvedAssociations
+                self.meetings = snapshot.meetings
                 self.isContextScoped = snapshot.isContextScoped
                 // A snapshot taken before the user's latest changes were saved would undo them.
                 if self.pendingChanges == 0 {

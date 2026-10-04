@@ -19,6 +19,9 @@ enum AttentionReason: String, Hashable, Sendable, Codable {
     case needsReviewer
     case readyToStart
 
+    // Calendar: a meeting is about to start. Its own signal; never raises a workstream.
+    case meetingSoon
+
     // Reserved for future signals.
     case stale
     case deadline

@@ -86,6 +86,8 @@ enum PriorityModel {
         case .stale: 5
         case .needsReviewer: 4
         case .draft, .readyToStart: 2
+        // Meetings are shown on their own and never ranked against workstreams.
+        case .meetingSoon: 0
         }
     }
 

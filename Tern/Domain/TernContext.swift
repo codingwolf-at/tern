@@ -33,8 +33,8 @@ enum WorkstreamContext: Hashable, Sendable {
     }
 }
 
-/// The user's statement of which GitHub owners and repositories are personal and which are
-/// professional. Nothing is inferred: a repository matching no rule is unclassified.
+/// The user's statement of which GitHub owners, repositories and calendars are personal and
+/// which are professional. Nothing is inferred: anything matching no rule is unclassified.
 ///
 /// Workstreams are classified as follows:
 /// - A repository rule wins over its owner's rule.
@@ -47,8 +47,29 @@ struct ContextRules: Hashable, Sendable, Codable {
     var owners: [String: TernContext] = [:]
     /// Exceptions for single repositories, keyed `github.com/owner/name`.
     var repositories: [String: TernContext] = [:]
+    /// macOS calendars by `calendarIdentifier`. A calendar without a rule is unclassified.
+    var calendars: [String: TernContext] = [:]
 
     static let none = ContextRules()
+
+    init() {}
+
+    /// Tolerates rules saved before calendars could be classified.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        owners = try container.decodeIfPresent([String: TernContext].self, forKey: .owners) ?? [:]
+        repositories = try container.decodeIfPresent([String: TernContext].self, forKey: .repositories) ?? [:]
+        calendars = try container.decodeIfPresent([String: TernContext].self, forKey: .calendars) ?? [:]
+    }
+
+    func context(forCalendar calendarID: String) -> WorkstreamContext {
+        calendars[calendarID].map(WorkstreamContext.init) ?? .unclassified
+    }
+
+    /// Sets (or with `nil`, clears) a calendar's context.
+    mutating func set(_ context: TernContext?, forCalendar calendarID: String) {
+        calendars[calendarID] = context
+    }
 
     /// `github.com/owner/name` (or `owner/name`) → its context.
     func context(forRepository repository: String) -> WorkstreamContext {

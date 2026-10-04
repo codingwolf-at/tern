@@ -36,7 +36,8 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 - **Panel sections.** *Needs you*, *Waiting*, *Active*, *Your other work*, *Done today* and *Idle*.
 - **Personal / Professional contexts.** Work is separated into two contexts; only the active one counts toward the queue and badge.
 - **Transition-based alerts.** Tern decides whether a change is worth surfacing by comparing it against what you were last shown, and marks genuinely new items in the panel.
-- **Integrations.** GitHub (through the `gh` CLI), Plane, and Claude Code hooks.
+- **Meeting awareness.** A meeting from a calendar you classified enters *Needs you* 15 minutes before it starts, once, with a Join action when the event carries a call link.
+- **Integrations.** GitHub (through the `gh` CLI), Plane, Claude Code hooks, and macOS Calendar (read-only).
 
 ## Screenshots
 
@@ -98,9 +99,10 @@ Personal and Professional are a domain-level split, not a view filter. The activ
 | --- | --- |
 | Personal GitHub repositories | Work GitHub organizations and repositories |
 | Agent sessions in personal repos | Plane work items |
-| — | Agent sessions in work repos |
+| Calendars marked Personal | Agent sessions in work repos |
+| — | Calendars marked Professional |
 
-Nothing is inferred. You classify a GitHub owner (or a single repository, which overrides its owner) once by right-clicking it in the panel; unknown repositories are intentionally *unclassified* and appear in neither context — only in a small Unclassified list — until you do. Plane is professional-only; a Plane item linked to a repository you marked Personal is a conflict and stays unclassified.
+Nothing is inferred. You classify a GitHub owner (or a single repository, which overrides its owner) once by right-clicking it in the panel; unknown repositories are intentionally *unclassified* and appear in neither context — only in a small Unclassified list — until you do. Plane is professional-only; a Plane item linked to a repository you marked Personal is a conflict and stays unclassified. Calendars are classified one by one under *Calendar* at the bottom of the panel; an unclassified calendar is never read.
 
 ## Integrations
 
@@ -109,6 +111,8 @@ Nothing is inferred. You classify a GitHub owner (or a single repository, which 
 **Plane** — Read-only sync of open work items assigned to you, from Plane Cloud or a self-hosted instance. You connect with a workspace and a personal access token, which is stored in the macOS login Keychain. Plane items are linked to pull requests when their identifier appears in the branch name, title or body.
 
 **Claude Code** — A small helper, `tern-hook`, is bundled inside `Tern.app` and registered as a Claude Code [command hook](https://docs.claude.com/en/docs/claude-code/hooks). It forwards session lifecycle events (started, needs input, finished, failed) to Tern through a local `tern://` URL. Only the fields Tern needs are forwarded — never prompts, responses, transcripts or tool input. Tern normalizes them into the same work events as every other integration.
+
+**Calendar** — Read-only access to the calendars on your Mac through EventKit, granted only when you press *Allow access*. Tern reads upcoming meetings from the calendars you marked Personal or Professional and keeps them in memory only: it persists the classification and which meeting alerts it has shown, never titles, notes, attendees or links. A meeting is not a workstream; it is its own short-lived source of attention that goes through the same notification policy. All-day events and meetings you declined never claim attention. The Join action appears only when the event itself carries a link to a known call service (Zoom, Meet, Teams, …).
 
 ## Local first
 
