@@ -455,3 +455,75 @@ struct PlaneStateSeparationTests {
         #expect(try await evaluate(PL.item(state: PL.done)).state == .complete)
     }
 }
+
+/// Debug and Release builds keep their Plane tokens in separate Keychain namespaces.
+/// Uses the real login keychain under a throwaway root, like the round-trip test above.
+@Suite("Credential isolation", .serialized)
+@MainActor
+struct CredentialIsolationTests {
+    private let root = "so.plane.tern.tests.\(UUID().uuidString)"
+
+    private func store(_ environment: BuildEnvironment) -> KeychainPlaneCredentialStore {
+        KeychainPlaneCredentialStore(keychain: KeychainStore(service: environment.keychainService("plane", root: root)))
+    }
+
+    private func cleanUp() {
+        for environment in [BuildEnvironment.debug, .release] { try? store(environment).delete(for: "plane") }
+    }
+
+    @Test("Release keeps the original service; Debug has its own; this test host is Debug")
+    func namespaces() {
+        #expect(BuildEnvironment.release.keychainService("plane") == "so.plane.tern.plane")
+        #expect(BuildEnvironment.debug.keychainService("plane") == "so.plane.tern.debug.plane")
+        #expect(BuildEnvironment.current == .debug)
+        #expect(KeychainPlaneCredentialStore().keychain.service == "so.plane.tern.debug.plane")
+    }
+
+    @Test("A Debug lookup never returns the Release token; Release finds its own")
+    func debugCannotReadRelease() throws {
+        defer { cleanUp() }
+        try store(.release).save("plane_api_release_secret", for: "plane")
+        #expect(try store(.debug).token(for: "plane") == nil)
+        #expect(try store(.release).token(for: "plane") == "plane_api_release_secret")
+
+        try store(.debug).save("plane_api_debug_secret", for: "plane")
+        #expect(try store(.debug).token(for: "plane") == "plane_api_debug_secret")
+        #expect(try store(.release).token(for: "plane") == "plane_api_release_secret")
+    }
+
+    @Test("Disconnecting deletes only this build's token, which never reaches defaults or logs")
+    func disconnectDeletesOnlyOwnToken() async throws {
+        defer { cleanUp() }
+        let start = Date()
+        try store(.release).save("plane_api_release_secret", for: "plane")
+        let defaults = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
+        let ingestion = IngestionService(store: InMemoryTernStore())
+        try await ingestion.start()
+        let account = PlaneAccount(ingestion: ingestion, credentials: store(.debug), http: PlaneStub(),
+                                   defaults: defaults, startSyncing: false, now: { PL.t0 })
+
+        account.connect(workspace: "plane", token: "plane_api_valid_test_token")
+        for _ in 0..<300 where !(try store(.debug).token(for: "plane") != nil) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(try store(.debug).token(for: "plane") == "plane_api_valid_test_token")
+
+        account.disconnect()
+        for _ in 0..<300 where try store(.debug).token(for: "plane") != nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(try store(.debug).token(for: "plane") == nil)
+        #expect(try store(.release).token(for: "plane") == "plane_api_release_secret")
+
+        let secrets = ["plane_api_valid_test_token", "plane_api_release_secret"]
+        let visible = [
+            defaults.dictionaryRepresentation().description,
+            String(describing: account.state),
+            String(describing: account.sync),
+            String(describing: store(.debug)),
+        ]
+        let log = try OSLogStore(scope: .currentProcessIdentifier)
+        let messages = try log.getEntries(at: log.position(date: start)).compactMap { $0 as? OSLogEntryLog }
+            .filter { $0.subsystem == "so.plane.tern" }.map(\.composedMessage)
+        for secret in secrets {
+            #expect(!visible.contains { $0.contains(secret) })
+            #expect(!messages.contains { $0.contains(secret) })
+        }
+    }
+}

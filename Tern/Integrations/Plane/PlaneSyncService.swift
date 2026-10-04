@@ -8,8 +8,17 @@ protocol PlaneCredentialStore: Sendable {
     func delete(for workspace: String) throws
 }
 
+/// Plane tokens in the login keychain, one item per workspace, in this build's own namespace.
 struct KeychainPlaneCredentialStore: PlaneCredentialStore {
-    var keychain = KeychainStore(service: "so.plane.tern.plane")
+    var keychain: KeychainStore
+
+    init(environment: BuildEnvironment = .current) {
+        keychain = KeychainStore(service: environment.keychainService("plane"))
+    }
+
+    init(keychain: KeychainStore) {
+        self.keychain = keychain
+    }
 
     func token(for workspace: String) throws -> String? {
         try keychain.read(workspace).map { String(decoding: $0, as: UTF8.self) }
