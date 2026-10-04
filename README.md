@@ -1,0 +1,185 @@
+# Tern
+
+> Know when it's your turn.
+
+Developer work is spread across pull requests, reviews, CI runs, issue trackers and AI coding sessions. Most of the time, that work is in someone else's hands — a reviewer, a pipeline, an agent. Tern is a small native macOS menu bar app that tracks the state of each piece of work and stays quiet until the next action comes back to you.
+
+> [!NOTE]
+> Tern is an actively developed personal side project. APIs, UI and architecture are still evolving.
+
+<!--
+Screenshots: add PNGs to docs/images/ and uncomment.
+
+<p align="center">
+  <img src="docs/images/panel.png" width="360" alt="Tern's menu bar panel">
+</p>
+-->
+
+## Why Tern
+
+Tern is not a notification aggregator. It models work as a stream of **ownership transitions**:
+
+```
+ME → AGENT → REVIEWER → ME → CI → ME → COMPLETE
+```
+
+The interesting event is not "something happened". It is "the ball is back with me".
+
+A new commit on a pull request you're reviewing, a CI run starting, an agent reading files — these change state, but they don't need you. A requested change, a failed check, or an agent waiting for input do. Tern is **quiet by default**: it surfaces a workstream only when the turn is yours and the reason is new.
+
+## What it does
+
+- **Menu bar app.** A native SwiftUI `MenuBarExtra` with a badge counting what needs you.
+- **Workstreams, not events.** A Plane work item, its pull request and the Claude Code sessions working on it are linked into one workstream.
+- **Ownership detection.** For each workstream Tern works out who holds the next action: you, an agent, a reviewer, CI, someone external, or nobody.
+- **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, personal, muted).
+- **Panel sections.** *Needs you*, *Waiting*, *Active*, *Your other work*, *Done today* and *Idle*.
+- **Personal / Professional contexts.** Work is separated into two contexts; only the active one counts toward the queue and badge.
+- **Transition-based alerts.** Tern decides whether a change is worth surfacing by comparing it against what you were last shown, and marks genuinely new items in the panel.
+- **Integrations.** GitHub (through the `gh` CLI), Plane, and Claude Code hooks.
+
+## Screenshots
+
+<!--
+<p align="center">
+  <img src="docs/images/needs-you.png" width="360" alt="Needs you section">
+  &nbsp;
+  <img src="docs/images/contexts.png" width="360" alt="Personal and Professional contexts">
+</p>
+-->
+
+*Screenshots coming soon.*
+
+## The core model
+
+```
+  Event          GitHub sync · Plane sync · Claude Code hook
+    ↓
+  Normalize      integration-specific payload → WorkEvent
+    ↓
+  Workstream     link by PR, branch, session, Plane identifier
+    ↓
+  State          active · waiting · blocked · needs attention · complete
+    ↓
+  Ownership      me · agent · reviewer · CI · external · none
+    ↓
+  Attention      silent · low · medium · high · urgent
+    ↓
+  Next action    "Address requested changes", "Answer Claude", …
+    ↓
+  Surface        panel, badge, "New" marker
+```
+
+Raw events never generate alerts directly. Every decision is derived from the workstream's full event history, so the same history always yields the same answer regardless of the order events arrived in. A change is surfaced only if the turn is yours at medium attention or above, and it differs from what you were last shown: the ball came back to you, it got more urgent, or a newer event caused it.
+
+## Attention model
+
+Tern keeps four ideas separate:
+
+| Concept | Question it answers |
+| --- | --- |
+| **State** | Where is this work in its lifecycle? |
+| **Ownership** | Who holds the next action? |
+| **Attention** | How loudly should it claim you? |
+| **Priority** | Among everything that needs you, what comes first? |
+
+Two examples:
+
+- **Approved and ready to merge.** If your team merges through a lead — signalled by a configurable label such as `ready to merge` — the merge is theirs. Tern shows the pull request as *waiting* on them rather than giving you a task.
+- **Changes pushed after review.** You pushed fixes, so the turn is technically yours (re-request review), but it isn't worth an interruption. It goes under *Your other work* instead of *Needs you*.
+
+Every surfaced item carries a reason (review requested, CI failed, agent needs input, …), so Tern can always say why something is in front of you.
+
+## Contexts
+
+Personal and Professional are a domain-level split, not a view filter. The active context determines what takes part in the attention queue, ranking and badge; switching recalculates all of it.
+
+| Personal | Professional |
+| --- | --- |
+| Personal GitHub repositories | Work GitHub organizations and repositories |
+| Agent sessions in personal repos | Plane work items |
+| — | Agent sessions in work repos |
+
+Nothing is inferred. You classify a GitHub owner (or a single repository) once from the panel's context menu; work in an unclassified repository is listed separately until you do. Plane is professional-only.
+
+## Integrations
+
+**GitHub** — Tern runs your installed, authenticated [`gh`](https://cli.github.com) CLI to read pull requests you authored and reviews requested from you. Authentication stays inside `gh`: Tern never asks for, reads or stores a GitHub token.
+
+**Plane** — Read-only sync of open work items assigned to you, from Plane Cloud or a self-hosted instance. You connect with a workspace and a personal access token, which is stored in the macOS login Keychain. Plane items are linked to pull requests when their identifier appears in the branch name, title or body.
+
+**Claude Code** — A small helper, `tern-hook`, is bundled inside `Tern.app` and registered as a Claude Code [command hook](https://docs.claude.com/en/docs/claude-code/hooks). It forwards session lifecycle events (started, needs input, finished, failed) to Tern through a local `tern://` URL. Only the fields Tern needs are forwarded — never prompts, responses, transcripts or tool input. Tern normalizes them into the same work events as every other integration.
+
+## Local first
+
+Tern runs entirely on your Mac and has no server of its own. It reuses authentication you already have (`gh`) or keeps credentials in the Keychain (Plane), and stores its state as a JSON file in `~/Library/Application Support/Tern/`. The only network traffic is Tern's own calls to GitHub (via `gh`) and to your Plane instance.
+
+## Architecture
+
+```
+Tern/
+├── App/            entry point, AppModel (panel state), URL routing
+├── Domain/         workstreams, events, ownership, attention, contexts, workflow rules
+├── Engine/         attention engine, ownership resolver, priority model, notification policy
+├── Services/       IngestionService — the single path from events to workstreams
+├── Integrations/   GitHub, Plane, Claude Code: sync, API models, normalizers
+├── Persistence/    JSON state store, Keychain
+├── UI/             SwiftUI panel, rows, connection views
+└── Debug/          mock scenarios and diagnostics (Debug builds only)
+TernHook/           the tern-hook command-line helper
+TernTests/          Swift Testing suite
+scripts/            install and hook-management scripts
+```
+
+Integrations only produce normalized events. `IngestionService` deduplicates them, links them to workstreams, and asks the engine — pure, deterministic functions over a workstream's history — for its current state, owner, attention and next action.
+
+## Development
+
+**Requirements:** macOS 15+, Xcode 16+ (Swift 6). Optional: an authenticated `gh` CLI, a Plane account, Claude Code.
+
+```bash
+open Tern.xcodeproj
+```
+
+Run the **Tern** scheme. Debug builds keep their own bundle ID, URL scheme, defaults and Keychain items, so they never touch an installed copy. They start in memory with a mock scenario; set `TERN_MOCK=0` in the scheme's environment to start empty.
+
+Build Release from the command line:
+
+```bash
+xcodebuild -project Tern.xcodeproj -scheme Tern -configuration Release build
+```
+
+Build, install to `/Applications`, register the Claude Code hooks and launch:
+
+```bash
+scripts/install-tern.sh
+```
+
+Run it again to upgrade. `--help` lists the options (`--no-hooks`, `--dest`, `--ad-hoc`, …). Hooks can be managed separately:
+
+```bash
+scripts/install-claude-hooks.sh status
+```
+
+Workflow rules (such as the merge hand-off label) are read from user defaults:
+
+```bash
+defaults write so.plane.tern workflow.rules '{"mergeHandOffs":[{"label":"ready to merge","mergedBy":"manager"}]}'
+```
+
+## Testing
+
+The project includes a comprehensive automated test suite written with [Swift Testing](https://developer.apple.com/xcode/swift-testing/), covering normalization, ownership, attention, notification decisions, determinism, persistence and the Claude Code hook path end to end.
+
+```bash
+xcodebuild test -project Tern.xcodeproj -scheme Tern -destination 'platform=macOS'
+```
+
+## Roadmap
+
+Ideas, not promises:
+
+- Calendar awareness — hold back interruptions during meetings
+- Richer workstream context and history in the panel
+- More developer workflow integrations
+- Clearer explanations of why something is or isn't surfaced
