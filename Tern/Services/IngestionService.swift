@@ -32,6 +32,7 @@ struct TernSnapshot: Hashable, Sendable {
     /// Meetings from classified calendars, both contexts, evaluated at the last refresh. Never
     /// persisted. Unclassified calendars' meetings are never here.
     var meetings: [MeetingStatus] = []
+    var snoozes: [Snooze] = []
     /// Whether work is limited to the active context. Always in the app; only Debug-built
     /// tests can turn it off (see `ContextScoping.ignoringContexts`).
     var isContextScoped = true
@@ -122,6 +123,7 @@ actor IngestionService {
             activeContext: persisted.activeContext,
             contextRules: persisted.contextRules,
             meetings: meetingStatuses,
+            snoozes: persisted.snoozes,
             isContextScoped: isContextScoped
         )
     }
@@ -220,6 +222,69 @@ actor IngestionService {
         meetingStatuses = statuses
         publish()
         deliver(surfaced)
+    }
+
+    /// Snoozes `subject` in `context` until `until`, or with `nil` ends its snooze. Nothing about
+    /// the subject changes. Ending a snooze (like expiry) re-surfaces the subject's current
+    /// transition through the normal notification policy: news once, otherwise nothing.
+    func setSnooze(_ subject: SubjectID, context: TernContext, until: Date?) throws {
+        guard isStarted else { throw IngestionError.notStarted }
+        var next = persisted
+        next.snoozes.removeAll { $0.subjectID == subject && $0.context == context }
+        if let until { next.snoozes.append(Snooze(subjectID: subject, context: context, until: until)) }
+        guard next.snoozes != persisted.snoozes else { return }
+        let pass = until == nil ? resurface([subject], in: &next) : Resurfacing()
+        try store.save(next)
+        commit(pass, next)
+    }
+
+    /// Ends every snooze that has run out, and gives each subject its normal evaluation back.
+    /// Called by the app at the earliest expiry (one timer, not one per snooze) and after launch.
+    func expireSnoozes() throws {
+        guard isStarted else { throw IngestionError.notStarted }
+        let at = now()
+        let expired = persisted.snoozes.filter { !$0.isActive(at: at) }
+        guard !expired.isEmpty else { return }
+        var next = persisted
+        next.snoozes.removeAll { !$0.isActive(at: at) }
+        let pass = resurface(expired.map(\.subjectID), in: &next)
+        try store.save(next)
+        commit(pass, next)
+    }
+
+    /// The current transition of each subject goes through `surface` again: a workstream's
+    /// current evaluation (no new event is made up), and every meeting at the current time,
+    /// so one that started or was cancelled meanwhile doesn't come back as "starts soon".
+    private func resurface(_ subjects: [SubjectID], in state: inout PersistedState) -> Resurfacing {
+        var pass = Resurfacing()
+        for subject in subjects where !subject.isMeeting {
+            guard var workstream = workstreams[WorkstreamID(subject.rawValue)] else { continue }
+            let context = state.contextRules.context(of: workstream)
+            guard let notification = state.surface(workstream.evaluation.transition, of: subject, in: context, headline: workstream.status.headline,
+                                                   mode: .live, isContextScoped: isContextScoped, at: now()) else { continue }
+            workstream.evaluation.decision = workstream.evaluation.decision.with(shouldNotify: true)
+            pass.workstreams[workstream.id] = workstream
+            pass.surfaced.append((notification, NotificationContent.payload(for: workstream, record: notification, context: context)))
+        }
+        if subjects.contains(where: \.isMeeting) {
+            pass.meetingStatuses = evaluateMeetings(in: &state, surfaced: &pass.surfaced)
+        }
+        return pass
+    }
+
+    /// What a resurfacing pass changes, applied in memory only once the state is saved.
+    private struct Resurfacing {
+        var surfaced: [Surfaced] = []
+        var workstreams: [WorkstreamID: Workstream] = [:]
+        var meetingStatuses: [MeetingStatus]?
+    }
+
+    private func commit(_ pass: Resurfacing, _ next: PersistedState) {
+        persisted = next
+        workstreams.merge(pass.workstreams) { _, new in new }
+        if let statuses = pass.meetingStatuses { meetingStatuses = statuses }
+        publish()
+        deliver(pass.surfaced)
     }
 
     /// Says which context a GitHub owner's repositories (or with `repository`, one repository,

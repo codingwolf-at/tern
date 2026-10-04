@@ -7,6 +7,8 @@ struct MeetingRow: View {
     let status: MeetingStatus
     var actions: ItemActions = .none
     var perform: @MainActor (ActionTarget) -> Void = { _ in }
+    /// Offered when the meeting can be snoozed.
+    var snooze: (@MainActor (SnoozeOption) -> Void)?
 
     @State private var isHovering = false
 
@@ -65,6 +67,7 @@ struct MeetingRow: View {
         .onTapGesture { if let join = actions.primary { perform(join) } }
         .contextMenu {
             actions.menuItems(perform: perform)
+            if let snooze { SnoozeMenu(snooze: snooze) }
             Button("Open Calendar") { Self.openCalendar() }
         }
         .help(actions.primary == nil ? "No meeting link in this event" : "Join meeting")

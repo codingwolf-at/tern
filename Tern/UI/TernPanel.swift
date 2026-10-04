@@ -27,6 +27,9 @@ struct TernPanel: View {
                     if !model.more.isEmpty {
                         compactSection("More", model.more, symbol: "circle.fill", detail: true)
                     }
+                    if !model.snoozed.isEmpty {
+                        snoozedSection
+                    }
                     section("Waiting", model.waiting.prefix(AppModel.waitingLimit).map(AttentionItem.workstream), empty: nil)
                     if model.waiting.count > AppModel.waitingLimit {
                         compactSection("More waiting", model.waiting.dropFirst(AppModel.waitingLimit).map(AttentionItem.workstream), symbol: "circle", detail: true)
@@ -227,6 +230,58 @@ struct TernPanel: View {
         return count == 0 ? "All quiet" : "\(count) need\(count == 1 ? "s" : "") you"
     }
 
+    /// Snooze lengths for an item that can be snoozed. Only items that claim attention qualify.
+    @ViewBuilder
+    private func snoozeMenu(for item: AttentionItem) -> some View {
+        if model.canSnooze(item) && !model.isSnoozed(item) {
+            SnoozeMenu { model.snooze(item, for: $0) }
+        }
+    }
+
+    /// Items the user said "not now" to: out of Needs you and the badge until the time shown.
+    private var snoozedSection: some View {
+        DisclosureGroup {
+            ForEach(model.snoozed) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "moon.zzz")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10)
+                    Text(item.workstream?.primaryLabel ?? "Meeting")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(item.workstream?.title ?? item.meeting?.meeting.title ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let until = model.snooze(of: item)?.until {
+                        Text("until \(until.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Button("Unsnooze") { model.unsnooze(item) }
+                        .buttonStyle(.borderless)
+                        .font(.caption2)
+                }
+                .padding(.vertical, 2)
+                .contextMenu {
+                    if let until = model.snooze(of: item)?.until {
+                        Text("Snoozed until \(until.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                    Button("Unsnooze") { model.unsnooze(item) }
+                }
+            }
+        } label: {
+            Text("SNOOZED · \(model.snoozed.count)")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .help("Needs you, but you said not now. Out of Needs you and the badge until the time shown.")
+        }
+        .padding(.horizontal, 8)
+    }
+
     /// The next meeting, and one under way, quietly. Not an agenda: at most one of each.
     private var upNextSection: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -264,11 +319,13 @@ struct TernPanel: View {
                         )
                         .contextMenu {
                             model.actions(for: .workstream(workstream)).menuItems { model.perform($0) }
+                            snoozeMenu(for: item)
                             importanceMenu(for: workstream)
                             if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
                         }
                     case .meeting(let meeting):
-                        MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) })
+                        MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) },
+                                   snooze: model.canSnooze(item) ? { @MainActor option in model.snooze(item, for: option) } : nil)
                     }
                 }
             }
@@ -319,6 +376,7 @@ struct TernPanel: View {
         .padding(.vertical, 2)
         .contextMenu {
             model.actions(for: .meeting(meeting)).menuItems { model.perform($0) }
+            snoozeMenu(for: .meeting(meeting))
             Button("Open Calendar") { MeetingRow.openCalendar() }
         }
     }
@@ -347,6 +405,7 @@ struct TernPanel: View {
         .padding(.vertical, 2)
         .contextMenu {
             model.actions(for: .workstream(workstream)).menuItems { model.perform($0) }
+            snoozeMenu(for: .workstream(workstream))
             importanceMenu(for: workstream)
             if model.isContextScoped, workstream.repositoryKey != nil { classifyMenu(for: workstream) }
         }

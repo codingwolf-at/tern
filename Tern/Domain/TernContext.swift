@@ -41,6 +41,17 @@ enum SubjectContext: Hashable, Sendable {
     }
 }
 
+extension TernContext {
+    /// `nil` for an unclassified subject, which belongs to neither context.
+    init?(_ context: SubjectContext) {
+        switch context {
+        case .personal: self = .personal
+        case .professional: self = .professional
+        case .unclassified: return nil
+        }
+    }
+}
+
 /// The user's statement of which GitHub owners, repositories and calendars are personal and
 /// which are professional. Nothing is inferred: anything matching no rule is unclassified.
 ///

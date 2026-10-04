@@ -223,8 +223,80 @@ final class AppModel {
     /// whose turn is the user's, and meetings inside their preparation window, on one ranking.
     /// Muted repositories never interrupt. Its size is the badge.
     var attentionQueue: [AttentionItem] {
-        ranked(scoped.filter { $0.needsAttentionNow && importance(of: $0) != .muted }.map(AttentionItem.workstream)
-            + scopedMeetings.filter(\.needsAttentionNow).map(AttentionItem.meeting))
+        ranked(unsnoozedCandidates.filter { !isSnoozed($0) })
+    }
+
+    /// Everything that would claim attention right now, before snoozes are applied.
+    private var unsnoozedCandidates: [AttentionItem] {
+        scoped.filter { $0.needsAttentionNow && importance(of: $0) != .muted }.map(AttentionItem.workstream)
+            + scopedMeetings.filter(\.needsAttentionNow).map(AttentionItem.meeting)
+    }
+
+    // MARK: - Snooze
+
+    /// Active and not-yet-cleaned-up snoozes, mirrored from the service.
+    private(set) var snoozes: [Snooze] = []
+    private var snoozeExpiry: Task<Void, Never>?
+
+    private func subjectContext(of item: AttentionItem) -> SubjectContext {
+        switch item {
+        case .workstream(let workstream): context(of: workstream)
+        case .meeting(let meeting): meeting.context
+        }
+    }
+
+    /// The snooze keeping `item` out of attention right now, if any. Applied after attention is
+    /// decided: the item's state, owner, attention and ranking are untouched.
+    func snooze(of item: AttentionItem) -> Snooze? {
+        snoozes.active(for: item.id, in: subjectContext(of: item), at: now())
+    }
+
+    func isSnoozed(_ item: AttentionItem) -> Bool { snooze(of: item) != nil }
+
+    /// Items that need the user but are snoozed, soonest back first. Out of Needs you, More and
+    /// the badge until then.
+    var snoozed: [AttentionItem] {
+        unsnoozedCandidates
+            .compactMap { item in snooze(of: item).map { (item, $0.until) } }
+            .sorted { ($0.1, $0.0.id) < ($1.1, $1.0.id) }
+            .map(\.0)
+    }
+
+    /// Only an item that currently claims attention, in a classified context, can be snoozed.
+    func canSnooze(_ item: AttentionItem) -> Bool {
+        unsnoozedCandidates.contains { $0.id == item.id } && subjectContext(of: item) != .unclassified
+    }
+
+    /// "Not now": hides the item from Needs you, More, the badge and notifications until the
+    /// snooze ends. Saved in order with the user's other changes.
+    func snooze(_ item: AttentionItem, for option: SnoozeOption, calendar: Calendar = .current) {
+        guard canSnooze(item), let context = TernContext(subjectContext(of: item)) else { return }
+        setSnooze(item.id, context: context, until: option.until(from: now(), calendar: calendar))
+    }
+
+    /// Ends the snooze now; the item's current attention applies again at once.
+    func unsnooze(_ item: AttentionItem) {
+        guard let snooze = snoozes.first(where: { $0.subjectID == item.id && subjectContext(of: item).isIn($0.context) }) else { return }
+        setSnooze(item.id, context: snooze.context, until: nil)
+    }
+
+    private func setSnooze(_ subject: SubjectID, context: TernContext, until: Date?) {
+        snoozes.removeAll { $0.subjectID == subject && $0.context == context }
+        if let until { snoozes.append(Snooze(subjectID: subject, context: context, until: until)) }
+        scheduleSnoozeExpiry()
+        save { try await $0.setSnooze(subject, context: context, until: until) }
+    }
+
+    /// One timer for the earliest snooze end; the service expires everything due at once.
+    private func scheduleSnoozeExpiry() {
+        snoozeExpiry?.cancel()
+        guard let next = snoozes.map(\.until).min() else { return }
+        let delay = max(0, next.timeIntervalSince(now()))
+        snoozeExpiry = Task { [service] in
+            try? await Task.sleep(for: .seconds(delay + 0.5))
+            guard !Task.isCancelled else { return }
+            try? await service.expireSnoozes()
+        }
     }
 
     /// The few things worth dealing with now.
@@ -384,6 +456,8 @@ final class AppModel {
             #endif
             // Calendar reports into ingestion, so it starts only once ingestion is ready.
             await self?.calendar?.service.start()
+            // Snoozes that ran out while Tern wasn't running end now.
+            try? await service.expireSnoozes()
             self?.deliverNotifications()
             for await snapshot in service.updates {
                 guard let self else { return }
@@ -396,6 +470,10 @@ final class AppModel {
                     self.importance = snapshot.repositoryImportance
                     self.activeContext = snapshot.activeContext
                     self.contextRules = snapshot.contextRules
+                    if self.snoozes != snapshot.snoozes {
+                        self.snoozes = snapshot.snoozes
+                        self.scheduleSnoozeExpiry()
+                    }
                 }
             }
         }

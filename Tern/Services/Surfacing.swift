@@ -8,9 +8,10 @@ import Foundation
 /// Pure bookkeeping over `PersistedState`; the caller decides what a subject's transition is.
 extension PersistedState {
     /// Records `transition` as the one shown for `subject` and returns a notification record
-    /// when it is news. Live subjects outside the active context are left untouched — neither
-    /// notified nor recorded as seen — so their own context decides later. A history import
-    /// records transitions as shown without notifying.
+    /// when it is news. Live subjects outside the active context, or snoozed in it, are left
+    /// untouched — neither notified nor recorded as seen — so their own context decides later,
+    /// or the snooze's end does (see `IngestionService.expireSnoozes`). A history import records
+    /// transitions as shown without notifying.
     mutating func surface(
         _ transition: AttentionTransition,
         of subject: SubjectID,
@@ -21,6 +22,7 @@ extension PersistedState {
         at date: Date
     ) -> NotificationRecord? {
         if mode == .live, isContextScoped, !context.isIn(activeContext) { return nil }
+        if mode == .live, snoozes.active(for: subject, in: context, at: date) != nil { return nil }
 
         let previous = shownTransitions.first { $0.subjectID == subject }
         let isNews = mode == .live

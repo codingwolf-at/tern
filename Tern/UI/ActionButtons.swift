@@ -29,6 +29,19 @@ struct ActionButtons: View {
     }
 }
 
+/// "Not now" for an item: the few snooze lengths. Secondary to the item's own action.
+struct SnoozeMenu: View {
+    let snooze: @MainActor (SnoozeOption) -> Void
+
+    var body: some View {
+        Menu("Snooze") {
+            ForEach(SnoozeOption.allCases, id: \.self) { option in
+                Button(option.title) { snooze(option) }
+            }
+        }
+    }
+}
+
 extension ItemActions {
     /// The same destinations as context-menu entries.
     @MainActor @ViewBuilder

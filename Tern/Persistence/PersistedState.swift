@@ -25,13 +25,15 @@ struct PersistedState: Hashable, Sendable, Codable {
     var shownTransitions: [ShownTransition] = []
     /// Most recent notifications, newest last.
     var notifications: [NotificationRecord] = []
+    /// Subjects the user said "not now" to, until a time. Expired ones are removed.
+    var snoozes: [Snooze] = []
 
     static let notificationHistoryLimit = 200
     static let unresolvedAssociationLimit = 50
 
     enum CodingKeys: String, CodingKey {
         case version, workstreams, links, hints, unresolvedAssociations, completedImports, repositoryImportance
-        case activeContext, contextRules, shownTransitions, notifications
+        case activeContext, contextRules, shownTransitions, notifications, snoozes
     }
 
     init() {}
@@ -50,6 +52,7 @@ struct PersistedState: Hashable, Sendable, Codable {
         contextRules = try container.decodeIfPresent(ContextRules.self, forKey: .contextRules) ?? ContextRules()
         shownTransitions = try container.decodeIfPresent([ShownTransition].self, forKey: .shownTransitions) ?? []
         notifications = try container.decodeIfPresent([NotificationRecord].self, forKey: .notifications) ?? []
+        snoozes = try container.decodeIfPresent([Snooze].self, forKey: .snoozes) ?? []
     }
 }
 
