@@ -358,7 +358,7 @@ struct CalendarTests {
         let source = FakeCalendarSource(.init(calendars: Self.calendars, meetings: [
             Self.meeting("w", in: Self.work, startsIn: 10), Self.meeting("o", in: Self.other, startsIn: 10),
         ]))
-        let account = CalendarAccount(ingestion: service, source: source, startSyncing: false, now: clock.now)
+        let account = CalendarAccount(ingestion: service, source: source, schedulesRefreshes: false, now: clock.now)
         await account.service.refresh()
         #expect(source.state.withLock { $0.fetchedCalendarIDs.last } == [Self.work, Self.home])
 

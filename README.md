@@ -145,7 +145,7 @@ Integrations only produce normalized events. `IngestionService` deduplicates the
 open Tern.xcodeproj
 ```
 
-Run the **Tern** scheme. Debug builds keep their own bundle ID, URL scheme, defaults and Keychain items, so they never touch an installed copy. They start in memory with a mock scenario; set `TERN_MOCK=0` in the scheme's environment to start empty.
+Run the **Tern** scheme. Debug builds keep their own bundle ID, URL scheme, defaults and Keychain items, so they never touch an installed copy. They start in memory with a mock scenario; set `TERN_MOCK=0` in the scheme's environment to start empty, or `TERN_PERSIST=1` to start without the mock and keep state across launches in `~/Library/Application Support/Tern/state-debug.json` (never the installed app's `state.json`).
 
 Build Release from the command line:
 
@@ -178,6 +178,23 @@ The project includes a comprehensive automated test suite written with [Swift Te
 ```bash
 xcodebuild test -project Tern.xcodeproj -scheme Tern -destination 'platform=macOS'
 ```
+
+### Calendar validation checklist
+
+A manual smoke test for the Calendar integration:
+
+1. Run the Debug build from Xcode with `TERN_PERSIST=1` in the scheme's environment (so step 11 can check a relaunch).
+2. Under *Calendar* at the bottom of the panel, press **Allow access…** and grant it. Ad-hoc-signed Debug builds can lose the grant after a rebuild; grant again if *Access off* appears.
+3. Open the calendar list and mark one calendar **Personal**.
+4. Mark another calendar **Professional**.
+5. In Calendar, create a meeting about 16 minutes from now in the Professional calendar, with a Google Meet or Zoom link in its URL, location or notes.
+6. Switch to Professional. The meeting shows under **Up next** with a countdown and "Needs you from <time>".
+7. At that time (15 minutes before the start) it moves to **Needs you**, marked *New*, with "Inside the 15-minute preparation window" and **Join meeting**; the badge counts it.
+8. Switch to Personal: it is gone from the panel and the badge. A Personal-calendar meeting behaves the same way the other way round.
+9. Back in Professional, click **Join meeting**: the call link opens. A meeting without a link shows **Prepare for meeting** and nothing to click.
+10. Switch contexts back and forth: no second *New* alert for the same meeting.
+11. Quit and relaunch: the meeting is still in Needs you, without a new alert.
+12. After the meeting starts it leaves Needs you (shown as in progress under Up next), and after it ends it disappears.
 
 ## Roadmap
 

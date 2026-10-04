@@ -65,14 +65,22 @@ final class AppModel {
     #endif
 
     /// DEBUG builds run in memory with the mock scenario (set `TERN_MOCK=0` to start empty and
-    /// see only real Claude Code sessions); release builds load persisted state.
+    /// see only real Claude Code sessions, or `TERN_PERSIST=1` to start without the mock and keep
+    /// state across launches in `state-debug.json`); release builds load persisted state.
     static func makeDefault() -> AppModel {
         // Import progress now lives in the persisted state; drop the old build-shared marker.
         UserDefaults.standard.removeObject(forKey: "github.importedLogins")
         let rules = WorkflowRules.load(from: .standard)
         #if DEBUG
-        let service = IngestionService(store: InMemoryTernStore(), rules: rules)
-        let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
+        let environment = ProcessInfo.processInfo.environment
+        let persists = environment["TERN_PERSIST"] == "1"
+        let store: any TernStore = if persists, let url = try? JSONFileTernStore.defaultURL(fileName: "state-debug.json") {
+            JSONFileTernStore(url: url)
+        } else {
+            InMemoryTernStore()
+        }
+        let service = IngestionService(store: store, rules: rules)
+        let useMock = environment["TERN_MOCK"] != "0" && !persists
         return AppModel(
             service: service,
             github: GitHubAccount(ingestion: service),
@@ -292,8 +300,8 @@ final class AppModel {
             #if DEBUG
             await self?.scenarioPlayer?.seed()
             #endif
-            // Calendar may have been read before ingestion was ready; read it again now.
-            await self?.calendar?.service.refresh()
+            // Calendar reports into ingestion, so it starts only once ingestion is ready.
+            await self?.calendar?.service.start()
             for await snapshot in service.updates {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams

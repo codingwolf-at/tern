@@ -61,6 +61,8 @@ enum MeetingEvaluator {
             decision = AttentionDecision(shouldNotify: false, state: state, nextOwner: .none, attention: .silent, nextAction: nil)
             transition = AttentionTransition(state: state, owner: .none, attention: .silent, causeID: nil, causeAt: nil)
         }
-        return MeetingStatus(meeting: meeting, context: context, phase: phase, decision: decision, transition: transition)
+        return MeetingStatus(meeting: meeting, context: context, phase: phase,
+                             attentionStartsAt: meeting.startsAt.addingTimeInterval(-policy.preparationWindow),
+                             decision: decision, transition: transition)
     }
 }

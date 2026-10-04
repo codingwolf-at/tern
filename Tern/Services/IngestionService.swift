@@ -349,7 +349,7 @@ actor IngestionService {
 
     // MARK: - Meetings
 
-    /// How long a meeting's shown transition is kept after it was surfaced.
+    /// How long a meeting's shown transition and notification record are kept after it was surfaced.
     static let meetingBookkeepingRetention: TimeInterval = 24 * 60 * 60
     static let meetingHeadline = "Meeting starting soon"
 
@@ -359,9 +359,13 @@ actor IngestionService {
     private func evaluateMeetings(in state: inout PersistedState, notifications: inout [NotificationRecord]) -> [MeetingStatus] {
         let at = now()
         var statuses: [MeetingStatus] = []
+        var included: Set<[String]> = []
         for meeting in meetings.sorted(by: { ($0.startsAt, $0.id) < ($1.startsAt, $1.id) }) {
             let context = state.contextRules.context(forCalendar: meeting.calendarID)
             guard context != .unclassified else { continue }
+            // One invitation in two calendars of the same context is one meeting. In different
+            // contexts each copy belongs to its own context, with its own bookkeeping.
+            guard included.insert([context.title, meeting.occurrenceKey]).inserted else { continue }
             var status = MeetingEvaluator.evaluate(meeting, context: context, at: at, policy: meetingPolicy)
             guard status.phase != .ended else { continue }
             // A meeting has a transition worth remembering only once it claims attention; a quiet
@@ -382,6 +386,7 @@ actor IngestionService {
             guard shown.subjectID.isMeeting, let causeAt = shown.transition.causeAt else { return false }
             return at.timeIntervalSince(causeAt) > Self.meetingBookkeepingRetention
         }
+        state.notifications.removeAll { $0.subjectID.isMeeting && at.timeIntervalSince($0.createdAt) > Self.meetingBookkeepingRetention }
         return statuses
     }
 

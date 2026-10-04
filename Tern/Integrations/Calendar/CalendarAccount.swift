@@ -13,16 +13,15 @@ final class CalendarAccount {
     /// Privacy & Security → Calendars.
     static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!
 
-    init(ingestion: IngestionService, source: any CalendarSource = EventKitCalendarSource(), startSyncing: Bool = true,
+    /// Reading starts when the app model calls `service.start()`, once ingestion is ready.
+    /// `schedulesRefreshes` is off in tests, which refresh by hand with an injected clock.
+    init(ingestion: IngestionService, source: any CalendarSource = EventKitCalendarSource(), schedulesRefreshes: Bool = true,
          now: @escaping @Sendable () -> Date = { .now }) {
-        service = CalendarSyncService(source: source, ingestion: ingestion, now: now, schedulesRefreshes: startSyncing)
+        service = CalendarSyncService(source: source, ingestion: ingestion, now: now, schedulesRefreshes: schedulesRefreshes)
         Task { [weak self, service] in
             for await status in service.statusUpdates {
                 self?.sync = status
             }
-        }
-        if startSyncing {
-            Task { [service] in await service.start() }
         }
     }
 
@@ -38,6 +37,8 @@ final class CalendarAccount {
         NSWorkspace.shared.open(Self.privacySettingsURL)
     }
 
+    /// Reads Calendar again: on opening the panel (which also notices access granted in System
+    /// Settings) and from the Refresh button. Never asks for access.
     func refresh() {
         Task { [service] in await service.refresh() }
     }

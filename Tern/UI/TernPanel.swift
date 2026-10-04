@@ -99,6 +99,8 @@ struct TernPanel: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 340)
+        // Opening the panel re-reads Calendar: cheap, and it notices access granted in System Settings.
+        .onAppear { model.calendar?.refresh() }
         .animation(.snappy(duration: 0.2), value: model.workstreams)
         .animation(.snappy(duration: 0.2), value: model.meetings)
         .animation(.snappy(duration: 0.2), value: expandedID)

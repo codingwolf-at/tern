@@ -36,6 +36,11 @@ struct MeetingRow: View {
                         .foregroundStyle(needsYou ? .primary : .secondary)
                         .monospacedDigit()
                 }
+                if let relevance = Self.relevance(of: status) {
+                    Text(relevance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -89,6 +94,19 @@ struct MeetingRow: View {
                 .buttonStyle(.plain)
         } else {
             label
+        }
+    }
+
+    /// Why the meeting is (or isn't yet) in Needs you, so its state is visible without guessing.
+    static func relevance(of status: MeetingStatus) -> String? {
+        if status.needsAttentionNow {
+            let window = Int(status.meeting.startsAt.timeIntervalSince(status.attentionStartsAt) / 60)
+            return "Inside the \(window)-minute preparation window"
+        }
+        return switch status.phase {
+        case .upcoming: "Needs you from \(status.attentionStartsAt.formatted(date: .omitted, time: .shortened))"
+        case .inProgress where status.meeting.joinURL != nil: "In progress · click to join"
+        case .preparing, .startingSoon, .inProgress, .ended: nil
         }
     }
 

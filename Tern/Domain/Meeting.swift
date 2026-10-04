@@ -24,9 +24,12 @@ struct Meeting: Identifiable, Hashable, Sendable {
         case declined
     }
 
-    /// Stable per occurrence: the event's identifier plus its start, because every occurrence of
-    /// a recurring event shares one identifier. Opaque; safe to persist and log.
+    /// Stable per occurrence and calendar. Opaque; safe to persist and log.
     let id: String
+    /// The same for every copy of one occurrence: the event's identifier plus its start, since all
+    /// occurrences of a recurring event share an identifier. The same invitation can show up in
+    /// two calendars (your own and a shared one); this is how they are recognised as one meeting.
+    let occurrenceKey: String
     let calendarID: String
     let calendarTitle: String
     let title: String
@@ -41,6 +44,7 @@ struct Meeting: Identifiable, Hashable, Sendable {
 
     init(
         id: String,
+        occurrenceKey: String? = nil,
         calendarID: String,
         calendarTitle: String = "",
         title: String,
@@ -52,6 +56,7 @@ struct Meeting: Identifiable, Hashable, Sendable {
         participation: Participation? = nil
     ) {
         self.id = id
+        self.occurrenceKey = occurrenceKey ?? id
         self.calendarID = calendarID
         self.calendarTitle = calendarTitle
         self.title = title
@@ -82,6 +87,8 @@ struct MeetingStatus: Identifiable, Hashable, Sendable {
     let meeting: Meeting
     let context: SubjectContext
     let phase: MeetingPhase
+    /// When it enters its preparation window and can need the user.
+    let attentionStartsAt: Date
     /// The same decision shape workstreams have: state, owner, attention, reason, next action.
     var decision: AttentionDecision
     let transition: AttentionTransition

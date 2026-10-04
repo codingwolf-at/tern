@@ -90,7 +90,11 @@ struct CalendarConnectionView: View {
             Button("Open Settings") { account.openPrivacySettings() }
                 .buttonStyle(.borderless)
                 .font(.caption)
-        case .restricted, .granted:
+        case .granted:
+            Button("Refresh") { account.refresh() }
+                .buttonStyle(.borderless)
+                .font(.caption)
+        case .restricted:
             EmptyView()
         }
     }

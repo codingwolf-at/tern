@@ -29,12 +29,13 @@ final class InMemoryTernStore: TernStore {
 struct JSONFileTernStore: TernStore {
     let url: URL
 
-    /// `~/Library/Containers/<bundle>/Data/Library/Application Support/Tern/state.json` under the sandbox.
-    static func defaultURL() throws -> URL {
+    /// `~/Library/Application Support/Tern/state.json` (inside the container under the sandbox).
+    /// Debug builds that persist use their own `state-debug.json` beside it, never the installed app's.
+    static func defaultURL(fileName: String = "state.json") throws -> URL {
         try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appending(path: "Tern", directoryHint: .isDirectory)
-            .appending(path: "state.json", directoryHint: .notDirectory)
+            .appending(path: fileName, directoryHint: .notDirectory)
     }
 
     func load() throws -> PersistedState {

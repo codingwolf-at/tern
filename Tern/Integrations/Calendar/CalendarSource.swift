@@ -32,9 +32,10 @@ protocol CalendarSource: Sendable {
 /// `@unchecked Sendable`: the event store is only used from `CalendarSyncService`, one call at a time.
 final class EventKitCalendarSource: CalendarSource, @unchecked Sendable {
     private let store = EKEventStore()
+    private var lastAuthorization: CalendarAuthorization?
 
     func authorization() -> CalendarAuthorization {
-        switch EKEventStore.authorizationStatus(for: .event) {
+        let authorization: CalendarAuthorization = switch EKEventStore.authorizationStatus(for: .event) {
         case .notDetermined: .notDetermined
         case .restricted: .restricted
         case .fullAccess: .granted
@@ -42,6 +43,11 @@ final class EventKitCalendarSource: CalendarSource, @unchecked Sendable {
         case .denied, .writeOnly: .denied
         @unknown default: .denied
         }
+        // Access granted in System Settings while Tern runs: a store created without access
+        // needs a reset before it returns anything.
+        if authorization == .granted, let last = lastAuthorization, last != .granted { store.reset() }
+        lastAuthorization = authorization
+        return authorization
     }
 
     func requestAccess() async throws -> Bool {
@@ -88,8 +94,10 @@ enum CalendarNormalizer {
               let startsAt = event.startDate, let endsAt = event.endDate
         else { return nil }
         let identifier = event.calendarItemExternalIdentifier ?? event.eventIdentifier ?? event.calendarItemIdentifier
+        let occurrence = "\(identifier)@\(Int(startsAt.timeIntervalSince1970))"
         return Meeting(
-            id: "\(identifier)@\(Int(startsAt.timeIntervalSince1970))",
+            id: "\(calendar.calendarIdentifier)/\(occurrence)",
+            occurrenceKey: occurrence,
             calendarID: calendar.calendarIdentifier,
             calendarTitle: calendar.title,
             title: event.title?.isEmpty == false ? event.title : "Untitled event",
@@ -132,8 +140,12 @@ enum MeetingLinks {
         return nil
     }
 
+    /// An https link on a known service's host with a path: a service's bare homepage (as in
+    /// "download Zoom at https://zoom.us") is not a meeting.
     static func isMeetingLink(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased() else { return false }
+        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased(),
+              !url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+        else { return false }
         return meetingHosts.contains { host == $0 || host.hasSuffix(".\($0)") }
     }
 
