@@ -9,15 +9,20 @@ struct MeetingRow: View {
     var perform: @MainActor (ActionTarget) -> Void = { _ in }
     /// Offered when the meeting can be snoozed.
     var snooze: (@MainActor (SnoozeOption) -> Void)?
+    /// The first item in Needs you: the one whose action is drawn in coral.
+    var isLead = false
 
     @State private var isHovering = false
 
     private var meeting: Meeting { status.meeting }
     private var needsYou: Bool { status.needsAttentionNow }
+    private var tone: AttentionTone {
+        .of(level: status.decision.attention, reason: status.decision.reason, mine: needsYou)
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            AttentionMarker(level: status.decision.attention, filled: needsYou)
+            OwnershipMarker(mark: needsYou ? .ball : .ring, tone: tone, label: needsYou ? "Your turn" : "Not yet")
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -26,12 +31,7 @@ struct MeetingRow: View {
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     if status.isNew {
-                        Text("New")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(status.decision.attention.tint)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(status.decision.attention.tint.opacity(0.15), in: Capsule())
+                        NewBadge()
                     }
                 }
                 TimelineView(.everyMinute) { context in
@@ -87,7 +87,7 @@ struct MeetingRow: View {
     @ViewBuilder
     private var actionLine: some View {
         if actions.primary != nil {
-            ActionButtons(actions: actions, tint: status.decision.attention == .silent ? .accentColor : status.decision.attention.tint, perform: perform)
+            ActionButtons(actions: actions, prominent: isLead && needsYou && tone == .yourTurn, perform: perform)
         } else if let action = status.decision.nextAction {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.turn.down.right")
@@ -95,7 +95,7 @@ struct MeetingRow: View {
                 Text(action.title)
                     .font(.caption.weight(.medium))
             }
-            .foregroundStyle(status.decision.attention.tint)
+            .foregroundStyle(.secondary)
         }
     }
 

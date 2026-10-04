@@ -26,7 +26,7 @@ struct ClaudeDiagnosticsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(isLive ? Color.green : Color.secondary.opacity(0.5))
+                        .fill(isLive ? TernColor.success : Color.secondary.opacity(0.5))
                         .frame(width: 6, height: 6)
                     Text("Claude Code")
                         .font(.caption.weight(.medium))
@@ -38,7 +38,7 @@ struct ClaudeDiagnosticsView: View {
                     if activity.rejected > 0 {
                         Text("\(activity.rejected) rejected")
                             .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(TernColor.warning)
                     }
                 }
                 if let event = activity.lastEvent, let at = activity.lastEventAt {

@@ -16,10 +16,10 @@ struct PlaneDiagnosticsView: View {
                 ForEach(Array(unresolved.suffix(3).enumerated()), id: \.offset) { _, issue in
                     Text("\(issue.kind.rawValue): \(issue.references.map(\.value).joined(separator: ", ")) → \(issue.workstreams.map(\.rawValue).joined(separator: " | "))")
                         .lineLimit(1)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(TernColor.warning)
                 }
                 if let error = sync.lastError {
-                    Text("Last error: \(error)").foregroundStyle(.orange)
+                    Text("Last error: \(error)").foregroundStyle(TernColor.warning)
                 }
             }
             .font(.caption2)

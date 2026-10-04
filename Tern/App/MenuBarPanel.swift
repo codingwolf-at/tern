@@ -59,20 +59,24 @@ final class MenuBarPanel: NSObject {
             Task { @MainActor in self?.updateIcon() }
         }
         let label = Self.label(needsYou: count, build: .current)
-        button.image = NSImage(systemSymbolName: label.symbol, accessibilityDescription: nil)
-        button.image?.isTemplate = true
+        let image = NSImage(named: label.image)
+        image?.isTemplate = true
+        image?.size = NSSize(width: 18, height: 18)
+        button.image = image
         button.title = label.title
         button.setAccessibilityLabel(label.accessibility)
     }
 
-    /// What the icon shows. Debug builds carry a "D" so they can't be mistaken for the installed
-    /// Tern running beside them.
-    nonisolated static func label(needsYou count: Int, build: BuildEnvironment) -> (symbol: String, title: String, accessibility: String) {
+    /// What the icon shows: the Turn mark's path alone while nothing needs the user, and the
+    /// path with its ball once the turn comes back. Monochrome template images, so the menu bar
+    /// tints them for light and dark. Debug builds carry a "D" so they can't be mistaken for the
+    /// installed Tern running beside them.
+    nonisolated static func label(needsYou count: Int, build: BuildEnvironment) -> (image: String, title: String, accessibility: String) {
         let mark = build == .debug ? "D" : ""
         let name = build == .debug ? "Tern Debug" : "Tern"
         if count > 0 {
-            return ("bird.fill", " \(count)\(mark.isEmpty ? "" : " \(mark)")", "\(name), \(count) need\(count == 1 ? "s" : "") you")
+            return ("TernMark", " \(count)\(mark.isEmpty ? "" : " \(mark)")", "\(name), \(count) need\(count == 1 ? "s" : "") you")
         }
-        return ("bird", mark.isEmpty ? "" : " \(mark)", name)
+        return ("TernMarkPath", mark.isEmpty ? "" : " \(mark)", name)
     }
 }

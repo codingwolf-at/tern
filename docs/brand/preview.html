@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tern Brand Preview</title>
+<style>
+  :root {
+    --paper: #F6F4EF; --ink: #17191C; --ink-2: #686C73; --ink-3: #9A9DA3; --line: #E3E0D8;
+    --card: #FFFFFF; --night: #141618; --night-card: #1D2023; --night-fg: #EDEBE6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 48px 16px 96px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  h1 { font: 600 28px/1.1 -apple-system, "SF Pro Display", system-ui; letter-spacing: -0.02em; margin: 0; }
+  h2 { font: 600 20px/1.2 -apple-system, "SF Pro Display", system-ui; letter-spacing: -0.01em; margin: 0 0 4px; }
+  h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); margin: 20px 0 8px; }
+  p.lede { color: var(--ink-2); margin: 0 0 40px; max-width: 640px; }
+  .concept { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; margin-bottom: 24px; }
+  .concept.rec { border-color: #E5533B; box-shadow: 0 0 0 1px #E5533B; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: #F0EEE9; color: var(--ink-2); margin-left: 8px; vertical-align: 3px; }
+  .rec .tag { background: #E5533B; color: #fff; }
+  .reject .tag { background: #F0EEE9; color: #A0A3A8; text-decoration: line-through; }
+  .sub { color: var(--ink-2); margin: 0 0 16px; }
+  .grid { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .hero { aspect-ratio: 1; border-radius: 12px; background: var(--paper); display: grid; place-items: center; }
+  .hero svg { width: 60%; height: 60%; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile { border-radius: 10px; padding: 12px 14px; display: flex; align-items: flex-end; gap: 14px; }
+  .tile.light { background: var(--paper); color: var(--ink); }
+  .tile.white { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .tile.dark { background: var(--night); color: var(--night-fg); }
+  .tile.accent { color: #fff; }
+  .tile figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .tile figcaption { font-size: 10px; opacity: 0.55; font-variant-numeric: tabular-nums; }
+  canvas.px { image-rendering: pixelated; width: 96px; height: 96px; border-radius: 6px; }
+  .pxrow { display: flex; gap: 10px; flex-wrap: wrap; }
+  .pxrow figure { margin: 0; text-align: center; font-size: 10px; color: var(--ink-2); }
+  .menubar { display: flex; align-items: center; justify-content: flex-end; gap: 14px; height: 24px; padding: 0 12px; border-radius: 8px; font: 500 13px -apple-system, system-ui; }
+  .menubar.light { background: rgba(246,246,246,0.92); color: #1d1d1f; border: 1px solid var(--line); }
+  .menubar.dark { background: #2a2b2e; color: #f2f2f2; }
+  .menubar .item { display: flex; align-items: center; gap: 4px; }
+  .menubar .muted { opacity: 0.85; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sw { width: 112px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); font-size: 11px; }
+  .sw div { height: 44px; }
+  .sw span { display: block; padding: 6px 8px; }
+  .sw b { display: block; font-weight: 600; }
+  .lockup { display: flex; align-items: center; gap: 10px; font: 600 30px/1 -apple-system, "SF Pro Display", system-ui; letter-spacing: -0.03em; }
+  .lockups { display: flex; flex-wrap: wrap; gap: 8px; }
+  .lockups > div { padding: 18px 22px; border-radius: 10px; }
+  dl.notes { display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; margin: 0; }
+  dl.notes dt { color: var(--ink-2); font-size: 12px; }
+  dl.notes dd { margin: 0; }
+  .verdict { font-weight: 600; }
+  .icons { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .icons svg { display: block; }
+  .ui { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .panel { border-radius: 12px; padding: 12px; font-size: 13px; }
+  .panel.light { background: #F3F3F1; border: 1px solid var(--line); }
+  .panel.dark { background: #232528; color: var(--night-fg); }
+  .panel .sec { font-size: 11px; font-weight: 600; opacity: 0.55; margin: 6px 4px; }
+  .panel .it { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border-radius: 8px; }
+  .panel .it + .it { margin-top: 2px; }
+  .panel .own { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; }
+  .panel .own.me { background: #E5533B; }
+  .panel.dark .own.me { background: #FF6A4D; }
+  .panel .own.other { border: 1.5px solid currentColor; opacity: 0.4; }
+  .panel .t { font-weight: 600; }
+  .panel .m { opacity: 0.6; font-size: 12px; }
+  .panel .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; opacity: 0.7; }
+  .panel .btn { margin-left: auto; align-self: center; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 6px; background: #E5533B; color: #fff; white-space: nowrap; }
+  .panel.dark .btn { background: #FF6A4D; color: #141618; }
+  .panel .btn.quiet { background: transparent; color: inherit; box-shadow: inset 0 0 0 1px rgba(127,127,127,0.35); }
+  .panel .crit { color: #C42452; font-weight: 500; }
+  .panel.dark .crit { color: #F2567A; }
+</style>
+</head>
+<body>
+<main>
+  <header><span id="logo"></span><h1>Tern — brand exploration</h1></header>
+  <p class="lede">Three directions for “Know when it’s your turn.” Each mark is shown large, across the macOS size ladder on light, white, dark and accent grounds, and as a true 1× pixel raster (scaled up, no smoothing) so collapse at small sizes is visible. Spec: <code>docs/BRAND.md</code>.</p>
+  <div id="concepts"></div>
+
+  <section class="concept">
+    <h2>Recommended system — Turn</h2>
+    <p class="sub">How the mark, colour and ownership language carry into the existing UI shape. Mockup only; the app is unchanged.</p>
+
+    <h3>Menu bar — idle vs your turn (template image)</h3>
+    <div class="row" style="flex-direction:column; gap:8px; max-width:520px">
+      <div class="menubar light"><span class="item" data-mark="turn-idle"></span><span class="muted">Sun 4 Oct 10:42</span></div>
+      <div class="menubar light"><span class="item" data-mark="turn-mono" data-count="2"></span><span class="muted">Sun 4 Oct 10:42</span></div>
+      <div class="menubar dark"><span class="item" data-mark="turn-idle"></span><span class="muted">Sun 4 Oct 10:42</span></div>
+      <div class="menubar dark"><span class="item" data-mark="turn-mono" data-count="2"></span><span class="muted">Sun 4 Oct 10:42</span></div>
+    </div>
+
+    <h3>App icon concept (not applied)</h3>
+    <div class="icons" id="appicons"></div>
+
+    <h3>Lockups</h3>
+    <div class="lockups">
+      <div style="background:var(--paper)"><div class="lockup" data-lockup="turn" style="color:var(--ink)"></div></div>
+      <div style="background:var(--night)"><div class="lockup" data-lockup="turn-dark" style="color:var(--night-fg)"></div></div>
+      <div style="background:#fff;border:1px solid var(--line)"><div class="lockup" style="color:var(--ink)">tern</div></div>
+    </div>
+
+    <h3>Palette</h3>
+    <div class="swatches" id="palette"></div>
+    <div class="swatches" id="palette-dark" style="margin-top:8px"></div>
+
+    <h3>Panel language</h3>
+    <div class="ui">
+      <div class="panel light" id="panel-light"></div>
+      <div class="panel dark" id="panel-dark"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+// Mark geometry mirrors docs/brand/concept-*.svg (24pt grid). Keep both in sync.
+const C = {
+  ink: '#17191C', fg: '#EDEBE6', coral: '#E5533B', coralD: '#FF6A4D',
+  teal: '#2B8A80', tealD: '#4FB8AC', blue: '#2F5BEA', blueD: '#6B8CFF'
+};
+const P = {
+  flight: 'M12 7.5C9.2 7.8 5 9.6 1.5 14.5C5.2 12.6 8.4 12.2 10.6 13.4L10 19.5L12 17.2L14 19.5L13.4 13.4C15.6 12.2 18.8 12.6 22.5 14.5C19 9.6 14.8 7.8 12 7.5Z',
+  turn: 'M3.75 11.5C6.5 7.6 10 5.5 14 5.5A6 6 0 0 1 14 17.5H13.25',
+  hop: 'M8.2 11.4C9.8 6.2 14.2 6.2 15.8 11.4'
+};
+// body(fg, accent) returns inner SVG for a mark.
+const MARKS = {
+  flight: (fg, ac) => `<path fill="${ac}" d="${P.flight}"/>`,
+  turn: (fg, ac, ball = true) => `<path d="${P.turn}" fill="none" stroke="${fg}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` +
+    (ball ? `<circle cx="7" cy="17.5" r="2.75" fill="${ac}"/>` : ''),
+  signal: (fg, ac) => `<g transform="translate(0.4 -0.5)" fill="none" stroke="${fg}" stroke-width="2.5" stroke-linecap="round"><circle cx="6" cy="15.5" r="3"/><path d="${P.hop}"/><circle cx="18" cy="15.5" r="3.5" fill="${ac}" stroke="none"/></g>`
+};
+const svg = (inner, size, vb = '0 0 24 24') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${size}" height="${size}">${inner}</svg>`;
+
+const CONCEPTS = [
+  { key: 'flight', name: 'A · Flight', status: 'Reject', cls: 'reject', accent: C.teal, accentD: C.tealD,
+    idea: 'An abstract tern from below — swept wings, forked tail — as one solid silhouette. Accent: Sea glass teal.',
+    verdict: 'Survives 16px as a blob, but reads as “bird app” first. Carries none of Tern’s actual idea (ownership, return).' },
+  { key: 'turn', name: 'B · Turn', status: 'Recommended', cls: 'rec', accent: C.coral, accentD: C.coralD,
+    idea: 'A path that rises, turns, and comes back; the ball lands with you. Accent: Bill coral, from the tern’s red-orange bill.',
+    verdict: 'Two strokes, one dot: holds at 16px. Encodes the product model. Dot doubles as the menu bar “your turn” state.' },
+  { key: 'signal', name: 'C · Signal', status: 'Runner-up', cls: '', accent: C.blue, accentD: C.blueD,
+    idea: 'A hollow ring hops to a filled dot: someone else had it, now it’s yours. Accent: Marine blue.',
+    verdict: 'Strong UI semantics (hollow = theirs, filled = yours). As a logo, reads as a git/graph glyph; ring’s counter is ~2px at 16@1× and muddies on dark.' }
+];
+
+function rasterCanvas(inner, px, scale = 1) {
+  const c = document.createElement('canvas');
+  c.width = px * scale; c.height = px * scale; c.className = 'px';
+  const img = new Image();
+  img.onload = () => c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(inner, px * scale));
+  return c;
+}
+
+function ladder(inner, cls, sizes = [16, 20, 24, 32, 64]) {
+  return `<div class="tile ${cls}">` + sizes.map(s => `<figure>${svg(inner, s)}<figcaption>${s}</figcaption></figure>`).join('') + `</div>`;
+}
+
+const root = document.getElementById('concepts');
+for (const k of CONCEPTS) {
+  const m = MARKS[k.key];
+  const el = document.createElement('section');
+  el.className = 'concept ' + k.cls;
+  el.innerHTML = `
+    <h2>${k.name}<span class="tag">${k.status}</span></h2>
+    <p class="sub">${k.idea}</p>
+    <div class="grid">
+      <div class="hero">${svg(m(C.ink, k.accent), 132)}</div>
+      <div>
+        <h3>Size ladder — colour on paper, white, dark</h3>
+        <div class="row">
+          ${ladder(m(C.ink, k.accent), 'light')}
+          ${ladder(m(C.ink, k.accent), 'white')}
+          ${ladder(m(C.fg, k.accentD), 'dark')}
+        </div>
+        <h3>Monochrome (template) and reversed on accent</h3>
+        <div class="row">
+          ${ladder(m('currentColor', 'currentColor'), 'light')}
+          ${ladder(m('currentColor', 'currentColor'), 'dark')}
+          <div class="tile accent" style="background:${k.accent}">${[16, 20, 32, 64].map(s => `<figure>${svg(m('#fff', '#fff'), s)}<figcaption>${s}</figcaption></figure>`).join('')}</div>
+        </div>
+        <h3>True pixel raster — 16@1×, 20@1×, 16@2× (menu bar Retina), dark 16@1×</h3>
+        <div class="pxrow" data-px="${k.key}"></div>
+        <h3>Verdict</h3>
+        <p class="verdict" style="margin:0">${k.verdict}</p>
+      </div>
+    </div>`;
+  root.appendChild(el);
+  const px = el.querySelector('[data-px]');
+  const add = (inner, size, scale, bg, label) => {
+    const f = document.createElement('figure');
+    const cv = rasterCanvas(inner, size, scale);
+    cv.style.background = bg;
+    f.appendChild(cv);
+    f.insertAdjacentHTML('beforeend', `<div>${label}</div>`);
+    px.appendChild(f);
+  };
+  add(m(C.ink, C.ink), 16, 1, '#F6F4EF', '16 · 1×');
+  add(m(C.ink, C.ink), 20, 1, '#F6F4EF', '20 · 1×');
+  add(m(C.ink, C.ink), 16, 2, '#F6F4EF', '16 · 2×');
+  add(m(C.fg, C.fg), 16, 1, '#141618', '16 · 1× dark');
+  add(m(C.ink, k.accent), 16, 1, '#F6F4EF', '16 · 1× colour');
+}
+
+// Header logo
+document.getElementById('logo').innerHTML = svg(MARKS.turn(C.ink, C.coral), 34);
+
+// Menu bar mocks
+document.querySelectorAll('[data-mark]').forEach(el => {
+  const ball = el.dataset.mark !== 'turn-idle';
+  el.innerHTML = svg(MARKS.turn('currentColor', 'currentColor', ball), 16) + (el.dataset.count ? `<span style="font-size:12px;font-variant-numeric:tabular-nums">${el.dataset.count}</span>` : '');
+});
+
+// Lockups
+document.querySelectorAll('[data-lockup]').forEach(el => {
+  const dark = el.dataset.lockup.endsWith('dark');
+  el.innerHTML = svg(MARKS.turn(dark ? C.fg : C.ink, dark ? C.coralD : C.coral), 36) + '<span>tern</span>';
+});
+
+// App icons: macOS grid — 824pt body inset 100pt in 1024, corner radius ~185.
+const icon = (bg, fg, ac, size) => svg(
+  `<rect x="100" y="100" width="824" height="824" rx="185" fill="${bg}"/>` +
+  `<g transform="translate(212 212) scale(25)">${MARKS.turn(fg, ac)}</g>`, size, '0 0 1024 1024');
+const ai = document.getElementById('appicons');
+[128, 64, 32, 16].forEach(s => ai.insertAdjacentHTML('beforeend', `<figure style="margin:0;text-align:center;font-size:10px;color:var(--ink-2)">${icon(C.ink, '#F6F4EF', C.coral, s)}<div>${s}</div></figure>`));
+[128, 32].forEach(s => ai.insertAdjacentHTML('beforeend', `<figure style="margin:0;text-align:center;font-size:10px;color:var(--ink-2)">${icon('#F6F4EF', C.ink, C.coral, s)}<div>${s} light</div></figure>`));
+
+// Palette
+const sw = (name, hex, note) => `<div class="sw"><div style="background:${hex}"></div><span><b>${name}</b>${hex}${note ? ' · ' + note : ''}</span></div>`;
+document.getElementById('palette').innerHTML = [
+  ['Paper', '#F6F4EF'], ['Ink', '#17191C'], ['Ink 2', '#686C73', 'text'], ['Ink 3', '#9A9DA3'],
+  ['Bill', '#E5533B', 'accent'], ['Bill text', '#C2412A'], ['Success', '#26794F'], ['Warning', '#96600F'], ['Critical', '#C42452']
+].map(a => sw(...a)).join('');
+document.getElementById('palette-dark').innerHTML = [
+  ['Night', '#141618'], ['Fog', '#EDEBE6'], ['Fog 2', '#9A9DA3', 'text'], ['Fog 3', '#6B6F76'],
+  ['Bill', '#FF6A4D', 'accent'], ['Success', '#4CC38A'], ['Warning', '#E8A33D'], ['Critical', '#F2567A']
+].map(a => sw(...a)).join('');
+
+// Panel mock
+const panel = `
+  <div class="sec">Needs you</div>
+  <div class="it mine"><span class="own me"></span><div><div class="t">Your turn — changes requested</div><div class="m"><span class="id">WEB-412</span> · PR #421 · 8m</div></div><span class="btn">Open PR</span></div>
+  <div class="it mine"><span class="own me"></span><div><div class="t"><span class="crit">CI failed</span> on main</div><div class="m"><span class="id">tern#88</span> · 2m</div></div><span class="btn quiet">Open PR</span></div>
+  <div class="it mine"><span class="own me"></span><div><div class="t">Design review</div><div class="m">Starts in 12 min</div></div><span class="btn quiet">Join</span></div>
+  <div class="sec">Waiting</div>
+  <div class="it"><span class="own other"></span><div><div class="t">Waiting on review</div><div class="m"><span class="id">WEB-398</span> · Reviewer · 3h</div></div></div>
+  <div class="it"><span class="own other"></span><div><div class="t">Agent working</div><div class="m"><span class="id">API-77</span> · Claude · now</div></div></div>`;
+document.getElementById('panel-light').innerHTML = panel;
+document.getElementById('panel-dark').innerHTML = panel;
+</script>
+</body>
+</html>

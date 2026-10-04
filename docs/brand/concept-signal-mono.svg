@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <title>Tern — concept C: Signal / Hop (monochrome / template)</title>
+  <g transform="translate(0.4 -0.5)" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <circle id="from" cx="6" cy="15.5" r="3"/>
+    <path id="hop" d="M8.2 11.4C9.8 6.2 14.2 6.2 15.8 11.4"/>
+    <circle id="to" cx="18" cy="15.5" r="3.5" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

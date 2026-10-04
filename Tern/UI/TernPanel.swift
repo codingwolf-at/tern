@@ -20,7 +20,7 @@ struct TernPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    section("Needs you", model.needsYou, empty: "Nothing needs you right now.")
+                    section("Needs you", model.needsYou, empty: "Nothing needs you.", isNeedsYou: true)
                     if model.upNext != nil || model.meetingInProgress != nil {
                         upNextSection
                     }
@@ -128,16 +128,20 @@ struct TernPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Tern")
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
+            HStack(alignment: .center, spacing: 6) {
+                TurnMark(isYourTurn: !model.attentionQueue.isEmpty)
+                    .frame(width: 18, height: 18)
+                Text("tern")
+                    .font(.wordmark)
+                    .tracking(-0.4)
+                    .accessibilityLabel("Tern")
                 if BuildEnvironment.current == .debug {
                     Text("DEBUG")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(TernColor.warning)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(.orange.opacity(0.15), in: Capsule())
+                        .background(TernColor.warning.opacity(0.15), in: Capsule())
                         .help("A Debug build: its own state, Plane token and Calendar access, separate from the installed Tern.")
                 }
                 Spacer()
@@ -155,6 +159,8 @@ struct TernPanel: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
+                // Ink, not the system accent and never coral: coral means "your turn".
+                .tint(.primary)
             }
         }
     }
@@ -248,7 +254,7 @@ struct TernPanel: View {
                         .foregroundStyle(.tertiary)
                         .frame(width: 10)
                     Text(item.workstream?.primaryLabel ?? "Meeting")
-                        .font(.caption)
+                        .font(item.workstream?.primaryLabelIsIdentifier == true ? .identifier(.caption) : .caption)
                         .foregroundStyle(.secondary)
                     Text(item.workstream?.title ?? item.meeting?.meeting.title ?? "")
                         .font(.caption)
@@ -263,6 +269,7 @@ struct TernPanel: View {
                     Button("Unsnooze") { model.unsnooze(item) }
                         .buttonStyle(.borderless)
                         .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
@@ -296,10 +303,10 @@ struct TernPanel: View {
     }
 
     @ViewBuilder
-    private func section(_ title: String, _ items: [AttentionItem], empty: String?) -> some View {
+    private func section(_ title: String, _ items: [AttentionItem], empty: String?, isNeedsYou: Bool = false) -> some View {
         if !items.isEmpty || empty != nil {
             VStack(alignment: .leading, spacing: 2) {
-                SectionHeader(title: title)
+                SectionHeader(title: title, isYourTurn: isNeedsYou && !items.isEmpty)
                 if items.isEmpty, let empty {
                     Text(empty)
                         .font(.callout)
@@ -315,7 +322,8 @@ struct TernPanel: View {
                             isExpanded: expandedID == workstream.id,
                             toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id },
                             actions: model.actions(for: .workstream(workstream)),
-                            perform: { model.perform($0) }
+                            perform: { model.perform($0) },
+                            isLead: isNeedsYou && item.id == items.first?.id
                         )
                         .contextMenu {
                             model.actions(for: .workstream(workstream)).menuItems { model.perform($0) }
@@ -325,7 +333,8 @@ struct TernPanel: View {
                         }
                     case .meeting(let meeting):
                         MeetingRow(status: meeting, actions: model.actions(for: .meeting(meeting)), perform: { model.perform($0) },
-                                   snooze: model.canSnooze(item) ? { @MainActor option in model.snooze(item, for: option) } : nil)
+                                   snooze: model.canSnooze(item) ? { @MainActor option in model.snooze(item, for: option) } : nil,
+                                   isLead: isNeedsYou && item.id == items.first?.id)
                     }
                 }
             }
@@ -388,7 +397,7 @@ struct TernPanel: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 10)
             Text(workstream.primaryLabel)
-                .font(.caption)
+                .font(workstream.primaryLabelIsIdentifier ? .identifier(.caption) : .caption)
                 .foregroundStyle(.secondary)
             Text(workstream.title)
                 .font(.caption)
@@ -437,7 +446,7 @@ struct TernPanel: View {
             if let error = model.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(TernColor.critical)
             } else {
                 Text("Quiet unless it's your turn")
                     .font(.caption)
@@ -456,12 +465,14 @@ struct TernPanel: View {
 
 private struct SectionHeader: View {
     let title: String
+    /// Needs you with something in it: the heading carries the coral.
+    var isYourTurn = false
 
     var body: some View {
         Text(title.uppercased())
             .font(.caption2.weight(.semibold))
             .tracking(0.8)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isYourTurn ? AnyShapeStyle(TernColor.yourTurnText) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 8)
             .padding(.top, 4)
             .padding(.bottom, 2)

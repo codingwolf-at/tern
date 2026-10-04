@@ -61,9 +61,9 @@ struct GitHubConnectionView: View {
 
     private var tint: Color {
         switch account.state {
-        case .connected: .green
+        case .connected: TernColor.success
         case .checking: .secondary
-        default: .orange
+        default: TernColor.warning
         }
     }
 }

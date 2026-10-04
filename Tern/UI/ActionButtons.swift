@@ -4,20 +4,25 @@ import SwiftUI
 /// Pressing either only takes the user there; nothing in Tern changes.
 struct ActionButtons: View {
     let actions: ItemActions
-    let tint: Color
+    /// Filled coral: the one action on screen that says "your turn". Everything else is neutral.
+    var prominent = false
     let perform: @MainActor (ActionTarget) -> Void
 
     var body: some View {
         if let primary = actions.primary {
             HStack(spacing: 6) {
-                Button { perform(primary) } label: {
+                let button = Button { perform(primary) } label: {
                     Label(primary.title, systemImage: primary.symbol)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(tint)
+                if prominent {
+                    button.buttonStyle(.borderedProminent).tint(TernColor.yourTurn)
+                } else {
+                    button.buttonStyle(.bordered)
+                }
                 if let secondary = actions.secondary {
                     Button { perform(secondary) } label: {
                         Label(secondary.title, systemImage: secondary.symbol)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.bordered)
                 }

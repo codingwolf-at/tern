@@ -131,9 +131,9 @@ struct CalendarConnectionView: View {
 
     private var tint: Color {
         switch account.authorization {
-        case .granted where account.sync.lastError == nil: .green
+        case .granted where account.sync.lastError == nil: TernColor.success
         case .notDetermined: .secondary
-        default: .orange
+        default: TernColor.warning
         }
     }
 }

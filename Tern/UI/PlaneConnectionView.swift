@@ -37,7 +37,7 @@ struct PlaneConnectionView: View {
             if let error = account.connectError {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(TernColor.critical)
             }
         }
         .onChange(of: account.state) { _, state in
@@ -133,9 +133,9 @@ struct PlaneConnectionView: View {
 
     private var tint: Color {
         switch account.state {
-        case .connected where !isRetrying: .green
+        case .connected where !isRetrying: TernColor.success
         case .notConnected, .connecting: .secondary
-        default: .orange
+        default: TernColor.warning
         }
     }
 

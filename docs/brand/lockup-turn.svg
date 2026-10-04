@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40">
+  <title>Tern — recommended lockup (mark + wordmark), light</title>
+  <!-- Mark: 24pt grid scaled to 36pt. Wordmark: live system text so it stays editable;
+       outline it before any use outside the app (see BRAND.md, Wordmark). -->
+  <g transform="translate(0 2) scale(1.5)">
+    <path d="M3.75 11.5C6.5 7.6 10 5.5 14 5.5A6 6 0 0 1 14 17.5H13.25" fill="none" stroke="#17191C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="7" cy="17.5" r="2.75" fill="#E5533B"/>
+  </g>
+  <text x="45" y="29" fill="#17191C" font-family="-apple-system, 'SF Pro Display', system-ui, sans-serif" font-size="29" font-weight="600" letter-spacing="-0.9">tern</text>
+</svg>

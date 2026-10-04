@@ -1,3 +1,5 @@
+<img src="docs/brand/concept-turn.svg" width="48" height="48" alt="The Tern mark: a path that turns and comes back, with a dot where it lands">
+
 # Tern
 
 > Know when it's your turn.
@@ -29,7 +31,7 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 
 ## What it does
 
-- **Menu bar app.** A menu bar icon with a badge counting what needs you, opening a SwiftUI panel.
+- **Menu bar app.** The Tern mark sits in the menu bar. When something needs you, the ball appears next to the path with a count beside it. Clicking it opens a SwiftUI panel.
 - **Workstreams, not events.** A Plane work item, its pull request and the Claude Code sessions working on it are linked into one workstream.
 - **Ownership detection.** For each workstream Tern works out who holds the next action: you, an agent, a reviewer, CI, someone external, or nobody.
 - **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, low priority, muted). This is a ranking preference, separate from Personal/Professional contexts.
@@ -119,6 +121,10 @@ Nothing is inferred. You classify a GitHub owner (or a single repository, which 
 ## Local first
 
 Tern runs entirely on your Mac and has no server of its own. It reuses authentication you already have (`gh`) or keeps credentials in the Keychain (Plane), and stores its state as a JSON file in `~/Library/Application Support/Tern/`. The only network traffic is Tern's own calls to GitHub (via `gh`) and to your Plane instance.
+
+## Visual identity
+
+The mark is a path that rises, turns and comes back, with a ball where it lands: the work went around, and now it's your turn. One accent colour, coral, means "your turn" and nothing else. Errors are crimson, and everything that isn't yours stays neutral. The UI uses system fonts, with SF Mono for identifiers. [docs/BRAND.md](docs/BRAND.md) has the full system and usage rules.
 
 ## Architecture
 

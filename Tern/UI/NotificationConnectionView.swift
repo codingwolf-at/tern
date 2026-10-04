@@ -73,9 +73,9 @@ struct NotificationConnectionView: View {
 
     private var tint: Color {
         switch delivery.authorization {
-        case .authorized: .green
+        case .authorized: TernColor.success
         case .notDetermined: .secondary
-        case .denied, .unavailable: .orange
+        case .denied, .unavailable: TernColor.warning
         }
     }
 }

@@ -6,20 +6,23 @@ struct WorkstreamRow: View {
     let toggle: () -> Void
     var actions: ItemActions = .none
     var perform: @MainActor (ActionTarget) -> Void = { _ in }
+    /// The first item in Needs you: the one whose action is drawn in coral.
+    var isLead = false
 
     @State private var isHovering = false
 
     private var isMyTurn: Bool { workstream.nextOwner == .me }
+    private var tone: AttentionTone {
+        .of(level: workstream.attention, reason: workstream.evaluation.decision.reason, mine: isMyTurn)
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            AttentionMarker(level: workstream.attention, filled: isMyTurn)
+            OwnershipMarker(owner: workstream.nextOwner, tone: tone)
 
             VStack(alignment: .leading, spacing: 2) {
                 titleLine
-                Text(workstream.status.headline)
-                    .font(.callout)
-                    .foregroundStyle(isMyTurn ? .primary : .secondary)
+                Headline(text: workstream.status.headline, tone: tone, emphasized: isMyTurn)
                 if let detail = workstream.status.detail {
                     Text(detail)
                         .font(.caption)
@@ -32,11 +35,11 @@ struct WorkstreamRow: View {
                         .lineLimit(1)
                 }
                 if isMyTurn, let action = workstream.nextAction {
-                    NextActionLine(action: action, tint: workstream.attention.tint)
+                    NextActionLine(action: action)
                         .padding(.top, 3)
                 }
                 if isMyTurn {
-                    ActionButtons(actions: actions, tint: workstream.attention == .silent ? .accentColor : workstream.attention.tint, perform: perform)
+                    ActionButtons(actions: actions, prominent: isLead && tone == .yourTurn, perform: perform)
                         .padding(.top, 2)
                 }
                 if isExpanded {
@@ -63,7 +66,7 @@ struct WorkstreamRow: View {
     private var titleLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(workstream.primaryLabel)
-                .font(.callout.weight(.semibold))
+                .font(workstream.primaryLabelIsIdentifier ? .identifier(.callout, weight: .semibold) : .callout.weight(.semibold))
             if workstream.primaryLabel != workstream.title {
                 Text(workstream.title)
                     .font(.caption)
@@ -72,12 +75,7 @@ struct WorkstreamRow: View {
             }
             Spacer(minLength: 4)
             if workstream.evaluation.decision.shouldNotify {
-                Text("New")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(workstream.attention.tint)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(workstream.attention.tint.opacity(0.15), in: Capsule())
+                NewBadge()
             }
             if let changed = workstream.lastMeaningfulChange {
                 Text(Age.compact(since: changed))
@@ -89,27 +87,87 @@ struct WorkstreamRow: View {
     }
 }
 
-/// Filled dot when it's the user's turn; hollow ring while someone else holds it.
-struct AttentionMarker: View {
-    let level: AttentionLevel
-    let filled: Bool
+/// The ball when the turn is the user's; a hollow ring while someone else holds it. It
+/// supplements the row's text, which always says whose move it is.
+struct OwnershipMarker: View {
+    let mark: OwnershipMark
+    let tone: AttentionTone
+    /// What VoiceOver says in place of the glyph.
+    let label: String
+
+    init(owner: Owner, tone: AttentionTone) {
+        mark = OwnershipMark(owner)
+        self.tone = tone
+        label = owner == .me ? "Your turn" : "\(owner.displayName) has it"
+    }
+
+    init(mark: OwnershipMark, tone: AttentionTone, label: String) {
+        self.mark = mark
+        self.tone = tone
+        self.label = label
+    }
 
     var body: some View {
         Group {
-            if filled {
-                Circle().fill(level.tint)
-            } else {
-                Circle().strokeBorder(.secondary, lineWidth: 1.2)
+            switch mark {
+            case .ball:
+                Circle().fill(tone == .quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(TernColor.yourTurn))
+            case .ring:
+                Circle().strokeBorder(.tertiary, lineWidth: 1.5)
+            case .none:
+                Color.clear
             }
         }
         .frame(width: 8, height: 8)
         .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+        .accessibilityLabel(label)
+        .accessibilityHidden(mark == .none)
+    }
+}
+
+/// A row's status line. Problems get crimson and a symbol, so they read as wrong without colour.
+struct Headline: View {
+    let text: String
+    let tone: AttentionTone
+    let emphasized: Bool
+
+    var body: some View {
+        if tone == .critical {
+            Label(text, systemImage: "exclamationmark.circle.fill")
+                .labelStyle(HeadlineLabelStyle())
+                .font(.callout)
+                .foregroundStyle(TernColor.critical)
+        } else {
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(emphasized ? .primary : .secondary)
+        }
+    }
+}
+
+private struct HeadlineLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
+    }
+}
+
+/// Marks a change the user hasn't been shown yet.
+struct NewBadge: View {
+    var body: some View {
+        Text("New")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(TernColor.yourTurnText)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(TernColor.yourTurn.opacity(0.12), in: Capsule())
     }
 }
 
 private struct NextActionLine: View {
     let action: NextAction
-    let tint: Color
 
     var body: some View {
         HStack(spacing: 4) {
@@ -123,7 +181,7 @@ private struct NextActionLine: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .foregroundStyle(tint)
+        .foregroundStyle(.secondary)
     }
 }
 
