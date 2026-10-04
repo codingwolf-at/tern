@@ -221,12 +221,16 @@ actor IngestionService {
             guard let record = next.workstreams.first(where: { $0.id == id }) else { continue }
             var workstream = rebuild(record)
             let transition = workstream.evaluation.transition
-            let lastShown = next.shownTransitions.first { $0.workstreamID == id }?.transition
-            let notify = mode == .live && NotificationPolicy.shouldNotify(transition, lastShown: lastShown)
+            let previous = next.shownTransitions.first { $0.workstreamID == id }
+            let notify = mode == .live
+                && NotificationPolicy.shouldNotify(transition, lastShown: previous?.transition)
+                && !(previous?.seen.contains(transition.fingerprint) ?? false)
 
             workstream.evaluation.decision = workstream.evaluation.decision.with(shouldNotify: notify)
+            var seen = (previous?.seen ?? []).filter { $0 != transition.fingerprint } + [transition.fingerprint]
+            seen = Array(seen.suffix(ShownTransition.seenLimit))
             next.shownTransitions.removeAll { $0.workstreamID == id }
-            next.shownTransitions.append(ShownTransition(workstreamID: id, transition: transition))
+            next.shownTransitions.append(ShownTransition(workstreamID: id, transition: transition, seen: seen))
             if notify {
                 let record = NotificationRecord(
                     workstreamID: id,

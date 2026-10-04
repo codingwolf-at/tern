@@ -120,14 +120,14 @@ final class AppModel {
         ranked(workstreams.filter { $0.nextOwner == .agent && $0.state != .complete })
     }
 
-    /// Yours, but nothing to interrupt for: drafts, PRs without reviewers, planned items
-    /// nobody has started.
+    /// Yours, but nothing to interrupt for: drafts, PRs without reviewers, re-request nudges.
     var yourWork: [Workstream] {
-        ranked(workstreams.filter { workstream in
-            guard workstream.state != .complete else { return false }
-            if workstream.nextOwner == .none { return true }
-            return workstream.nextOwner == .me && !workstream.needsAttentionNow
-        })
+        ranked(workstreams.filter { $0.nextOwner == .me && !$0.needsAttentionNow && $0.state != .complete })
+    }
+
+    /// Open work nobody is moving: e.g. a Plane item with no pull request or session yet.
+    var idle: [Workstream] {
+        ranked(workstreams.filter { $0.nextOwner == .none && $0.state != .complete })
     }
 
     /// Finished today. Older completed work stays in history but out of the panel.

@@ -5,7 +5,13 @@ import Foundation
 /// The payload travels as base64url so paths with spaces, quotes, Unicode or reserved URL
 /// characters survive intact without any hand-rolled escaping.
 enum ClaudeHookURL {
+    /// Debug builds use their own scheme so hooks installed for the real app can never be
+    /// routed to a development build (which keeps its state in memory).
+    #if DEBUG
+    static let scheme = "tern-debug"
+    #else
     static let scheme = "tern"
+    #endif
     static let host = "claude-hook"
     static let version = "1"
     /// Generous for the allowlisted fields; rejects anything unexpectedly large.

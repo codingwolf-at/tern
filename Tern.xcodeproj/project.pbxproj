@@ -354,9 +354,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = so.plane.tern;
+				PRODUCT_BUNDLE_IDENTIFIER = so.plane.tern.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				TERN_URL_SCHEME = "tern-debug";
 			};
 			name = Debug;
 		};
@@ -386,6 +387,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = so.plane.tern;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				TERN_URL_SCHEME = tern;
 			};
 			name = Release;
 		};

@@ -152,20 +152,20 @@ struct ClaudeHookTransportTests {
             notification: "permission_prompt", message: String(repeating: "long message ", count: 600)
         )
         let url = try ClaudeHookURL.encode(original)
-        #expect(url.scheme == "tern")
+        #expect(url.scheme == ClaudeHookURL.scheme)
         #expect(url.absoluteString.contains(" ") == false)
         #expect(try ClaudeHookURL.decode(url) == original)
     }
 
     @Test("Malformed, foreign and oversized URLs are rejected")
     func rejects() throws {
-        #expect(throws: ClaudeHookURL.DecodingError.notAHookURL) { try ClaudeHookURL.decode(URL(string: "tern://other?v=1&p=e30")!) }
-        #expect(throws: ClaudeHookURL.DecodingError.unsupportedVersion) { try ClaudeHookURL.decode(URL(string: "tern://claude-hook?v=9&p=e30")!) }
-        #expect(throws: ClaudeHookURL.DecodingError.missingPayload) { try ClaudeHookURL.decode(URL(string: "tern://claude-hook?v=1")!) }
-        #expect(throws: ClaudeHookURL.DecodingError.malformedPayload) { try ClaudeHookURL.decode(URL(string: "tern://claude-hook?v=1&p=!!!")!) }
-        #expect(throws: ClaudeHookURL.DecodingError.malformedPayload) { try ClaudeHookURL.decode(URL(string: "tern://claude-hook?v=1&p=e30")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.notAHookURL) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://other?v=1&p=e30")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.unsupportedVersion) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://claude-hook?v=9&p=e30")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.missingPayload) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://claude-hook?v=1")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.malformedPayload) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://claude-hook?v=1&p=!!!")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.malformedPayload) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://claude-hook?v=1&p=e30")!) }
         let huge = String(repeating: "A", count: 40_000)
-        #expect(throws: ClaudeHookURL.DecodingError.payloadTooLarge) { try ClaudeHookURL.decode(URL(string: "tern://claude-hook?v=1&p=\(huge)")!) }
+        #expect(throws: ClaudeHookURL.DecodingError.payloadTooLarge) { try ClaudeHookURL.decode(URL(string: "\(ClaudeHookURL.scheme)://claude-hook?v=1&p=\(huge)")!) }
     }
 }
 

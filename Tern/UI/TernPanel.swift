@@ -30,6 +30,9 @@ struct TernPanel: View {
                     if !model.doneToday.isEmpty {
                         compactSection("Done today", model.doneToday, symbol: "checkmark", detail: false)
                     }
+                    if !model.idle.isEmpty {
+                        compactSection("Idle", model.idle, symbol: "pause", detail: true)
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)

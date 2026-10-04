@@ -8,11 +8,12 @@ struct ClaudeDiagnosticsView: View {
 
     private var activity: ClaudeHookReceiver.Activity { receiver.activity }
 
-    private var activeSessions: Int {
-        workstreams
-            .flatMap(\.agentSessions)
-            .filter { $0.id.hasPrefix("\(ClaudeHookNormalizer.provider):") && $0.status != .ended }
-            .count
+    private var sessions: [AgentSession] {
+        workstreams.flatMap(\.agentSessions).filter { $0.id.hasPrefix("\(ClaudeHookNormalizer.provider):") && $0.status != .ended }
+    }
+
+    private func count(_ status: AgentSession.Status) -> Int {
+        sessions.filter { $0.status == status }.count
     }
 
     private var lastWorkstream: String? {
@@ -41,15 +42,16 @@ struct ClaudeDiagnosticsView: View {
                     }
                 }
                 if let event = activity.lastEvent, let at = activity.lastEventAt {
-                    Text("Last \(event) · \(Age.compact(since: at, now: context.date)) · \(activeSessions) active · \(activity.received) received")
+                    Text("Last \(event) · \(Age.compact(since: at, now: context.date)) · \(activity.received) received")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    if let lastWorkstream {
-                        Text("→ \(lastWorkstream)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
+                    Text("Sessions \(sessions.count) · working \(count(.working)) · needs input \(count(.needsInput)) · completed \(count(.completed)) · failed \(count(.failed))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text("\(activity.lastRepository ?? "no repository") @ \(activity.lastBranch ?? "-") → \(lastWorkstream ?? "no workstream")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }

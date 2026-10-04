@@ -59,4 +59,22 @@ struct WorkstreamRecord: Hashable, Sendable, Codable {
 struct ShownTransition: Hashable, Sendable, Codable {
     let workstreamID: WorkstreamID
     let transition: AttentionTransition
+    /// Fingerprints of transitions already shown for this workstream (newest last), so coming
+    /// back to one — e.g. after an agent turn — isn't news.
+    var seen: [String] = []
+
+    static let seenLimit = 50
+
+    init(workstreamID: WorkstreamID, transition: AttentionTransition, seen: [String] = []) {
+        self.workstreamID = workstreamID
+        self.transition = transition
+        self.seen = seen
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        workstreamID = try container.decode(WorkstreamID.self, forKey: .workstreamID)
+        transition = try container.decode(AttentionTransition.self, forKey: .transition)
+        seen = try container.decodeIfPresent([String].self, forKey: .seen) ?? [transition.fingerprint]
+    }
 }

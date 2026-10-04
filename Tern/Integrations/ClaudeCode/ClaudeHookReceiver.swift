@@ -12,6 +12,9 @@ final class ClaudeHookReceiver {
         var lastEvent: String?
         var lastEventAt: Date?
         var lastWorkstreamID: WorkstreamID?
+        /// Where the last event came from: `owner/name` (or the folder) and branch. Never paths or content.
+        var lastRepository: String?
+        var lastBranch: String?
         var received = 0
         var rejected = 0
     }
@@ -43,6 +46,10 @@ final class ClaudeHookReceiver {
         activity.received += 1
         activity.lastEvent = payload.hookEventName
         activity.lastEventAt = now()
+        if let repository = payload.gitRemote ?? payload.gitRoot.map({ URL(fileURLWithPath: $0).lastPathComponent }) {
+            activity.lastRepository = repository
+        }
+        if let branch = payload.gitBranch { activity.lastBranch = branch }
 
         guard let event = ClaudeHookNormalizer.normalize(payload, receivedAt: now()) else { return nil }
         do {

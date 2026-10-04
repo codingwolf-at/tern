@@ -159,7 +159,9 @@ if event == "Notification", let message = payload["message"] as? String {
 forwarded["tern_seq"] = sequence
 forwarded["tern_ts"] = Int64(Date().timeIntervalSince1970 * 1000)
 
-if let cwd = payload["cwd"] as? String, event != "SessionEnd", let git = gitExecutable() {
+// Turn and session endings belong to a session that's already linked; skip git to deliver fast.
+let endsTurnOrSession: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
+if let cwd = payload["cwd"] as? String, !endsTurnOrSession.contains(event), let git = gitExecutable() {
     if let root = run(git, ["-C", cwd, "rev-parse", "--show-toplevel"]) {
         forwarded["tern_git_root"] = root
         if let remote = run(git, ["-C", cwd, "remote", "get-url", "origin"]).flatMap(gitHubRepository) {
@@ -181,15 +183,34 @@ let encoded = json.base64EncodedString()
     .replacingOccurrences(of: "/", with: "_")
     .replacingOccurrences(of: "=", with: "")
 var components = URLComponents()
+#if DEBUG
+components.scheme = "tern-debug" // matches the Debug app; installed hooks use the Release helper
+#else
 components.scheme = "tern"
+#endif
 components.host = "claude-hook"
 components.queryItems = [URLQueryItem(name: "v", value: "1"), URLQueryItem(name: "p", value: encoded)]
 guard let url = components.url else { exit(0) }
 
+/// Hands the URL to Launch Services in a new session and doesn't wait. Claude Code may end the
+/// hook's process group as soon as it exits (e.g. right after a `claude -p` turn fails), and a
+/// delivery in flight must survive that.
+func deliverDetached(_ url: URL) {
+    var attributes: posix_spawnattr_t?
+    posix_spawnattr_init(&attributes)
+    defer { posix_spawnattr_destroy(&attributes) }
+    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+    // -g: deliver in the background without activating Tern or showing a window.
+    let arguments = ["/usr/bin/open", "-g", url.absoluteString]
+    var argv = arguments.map { strdup($0) } + [nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    _ = posix_spawn(&pid, "/usr/bin/open", nil, &attributes, &argv, environ)
+}
+
 if environment["TERN_HOOK_PRINT"] == "1" {
     print(url.absoluteString)
 } else {
-    // -g: deliver in the background without activating Tern or showing a window.
-    _ = run("/usr/bin/open", ["-g", url.absoluteString], timeout: 5)
+    deliverDetached(url)
 }
 exit(0)

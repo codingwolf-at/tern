@@ -3,7 +3,8 @@
 ///
 /// Quiet by default. Notify only when the turn is mine at medium attention or above and
 /// it is genuinely new: the turn came back to me, it got louder, or a newer event caused it.
-/// A transition with the same fingerprint as the last one shown is never repeated.
+/// A transition with the same fingerprint as the last one shown is never repeated, and ingestion
+/// also suppresses any transition shown earlier for the workstream (see `ShownTransition.seen`).
 enum NotificationPolicy {
     static func shouldNotify(_ transition: AttentionTransition, lastShown: AttentionTransition?) -> Bool {
         guard transition.owner == .me, transition.attention >= .medium else { return false }
