@@ -8,11 +8,15 @@ import os
 @Observable
 final class AppModel {
     private(set) var workstreams: [Workstream] = []
+    /// Associations Tern declined to make (diagnostics only).
+    private(set) var unresolvedAssociations: [AssociationIssue] = []
     private(set) var errorMessage: String?
     /// Entry point for Claude Code hook events. Owned here so diagnostics can observe it.
     let claudeHooks: ClaudeHookReceiver
     /// GitHub connection and sync status; `nil` when GitHub isn't part of this model (tests).
     let github: GitHubAccount?
+    /// Plane connection and sync status; `nil` when Plane isn't part of this model (tests).
+    let plane: PlaneAccount?
 
     #if DEBUG
     /// Present only when running the mock scenario.
@@ -23,18 +27,20 @@ final class AppModel {
     private let logger = Logger(subsystem: "so.plane.tern", category: "app")
 
     #if DEBUG
-    init(service: IngestionService, github: GitHubAccount? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
+        self.plane = plane
         self.scenarioPlayer = scenarioPlayer
         observe()
     }
     #else
-    init(service: IngestionService, github: GitHubAccount? = nil) {
+    init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil) {
         self.service = service
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
+        self.plane = plane
         observe()
     }
     #endif
@@ -48,12 +54,13 @@ final class AppModel {
         return AppModel(
             service: service,
             github: GitHubAccount(ingestion: service),
+            plane: PlaneAccount(ingestion: service),
             scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil
         )
         #else
         do {
             let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()))
-            return AppModel(service: service, github: GitHubAccount(ingestion: service))
+            return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
             model.report(error)
@@ -77,7 +84,14 @@ final class AppModel {
     /// Workstreams someone or something else is moving forward.
     var waiting: [Workstream] {
         workstreams
-            .filter { $0.nextOwner != .me && $0.state != .complete }
+            .filter { $0.nextOwner != .me && $0.nextOwner != .none && $0.state != .complete }
+            .sorted { ($0.lastMeaningfulChange ?? .distantPast) > ($1.lastMeaningfulChange ?? .distantPast) }
+    }
+
+    /// Open work nobody is moving right now (e.g. a Plane item with no PR or session yet).
+    var notMoving: [Workstream] {
+        workstreams
+            .filter { $0.nextOwner == .none && $0.state != .complete }
             .sorted { ($0.lastMeaningfulChange ?? .distantPast) > ($1.lastMeaningfulChange ?? .distantPast) }
     }
 
@@ -101,6 +115,7 @@ final class AppModel {
             for await snapshot in service.updates {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams
+                self.unresolvedAssociations = snapshot.unresolvedAssociations
             }
         }
     }

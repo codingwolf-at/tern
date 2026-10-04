@@ -41,7 +41,10 @@ struct OwnershipResolver: Sendable {
     }
 
     func resolve(_ facts: WorkstreamFacts) -> Resolution {
-        if let completion = facts.completion {
+        // Plane closing the item finishes the workstream only when no pull request is still open:
+        // a merge or close on GitHub is authoritative, and an open PR still has a next action.
+        let planeClosedWithoutOpenPR = facts.pullRequest.opened == nil ? facts.planeClosed : nil
+        if let completion = facts.completion ?? planeClosedWithoutOpenPR {
             return Resolution(
                 state: .complete,
                 owner: .none,
@@ -103,6 +106,17 @@ struct OwnershipResolver: Sendable {
                 nextAction: NextAction(title: "Request a review", reason: "Pull request has no reviewer yet", estimatedMinutes: 2),
                 status: StatusLine(headline: "PR open", detail: "No reviewer yet", focus: .github),
                 cause: opened
+            )
+        }
+        if let created = facts.planeItem, let plane = facts.planeState {
+            // Only Plane knows about this work: show its Plane state, but don't invent an owner.
+            return Resolution(
+                state: .active,
+                owner: .none,
+                attention: .silent,
+                nextAction: nil,
+                status: StatusLine(headline: plane.name, detail: "No pull request or session yet", focus: .plane),
+                cause: plane.stamp.at < created.at ? created : plane.stamp
             )
         }
         if let created = facts.planeItem {

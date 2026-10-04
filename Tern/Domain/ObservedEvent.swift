@@ -7,8 +7,9 @@ struct ExternalReference: Hashable, Sendable, Codable {
     let kind: String
     let value: String
 
+    /// A Plane work item by its human identifier, e.g. `WEB-9295`.
     static func planeItem(_ identifier: String) -> ExternalReference {
-        ExternalReference(kind: "plane.item", value: identifier)
+        ExternalReference(kind: "plane.item", value: identifier.uppercased())
     }
 
     static func pullRequest(repository: String, number: Int) -> ExternalReference {
@@ -54,6 +55,12 @@ struct ObservedEvent: Hashable, Sendable {
     let allowsNewWorkstream: Bool
     /// Pull request this event belongs to; attached to the workstream if it has none yet.
     let pullRequest: PullRequestReference?
+    /// Plane work item this event belongs to; attached (and used as the title) if the
+    /// workstream has none yet.
+    let planeItem: PlaneItemReference?
+    /// References this event mentions without being about them, such as a Plane identifier
+    /// in a branch name or PR title. Used to find a workstream, never linked directly.
+    let candidates: [ExternalReference]
 
     init(
         id: EventID,
@@ -65,7 +72,9 @@ struct ObservedEvent: Hashable, Sendable {
         suggestedTitle: String? = nil,
         workstreamKey: ExternalReference? = nil,
         allowsNewWorkstream: Bool = true,
-        pullRequest: PullRequestReference? = nil
+        pullRequest: PullRequestReference? = nil,
+        planeItem: PlaneItemReference? = nil,
+        candidates: [ExternalReference] = []
     ) {
         self.id = id
         self.source = source
@@ -77,6 +86,8 @@ struct ObservedEvent: Hashable, Sendable {
         self.workstreamKey = workstreamKey
         self.allowsNewWorkstream = allowsNewWorkstream
         self.pullRequest = pullRequest
+        self.planeItem = planeItem
+        self.candidates = candidates
     }
 
     func linked(to workstreamID: WorkstreamID) -> WorkEvent {

@@ -18,12 +18,14 @@ struct IngestReport: Hashable, Sendable {
     var unlinked: [EventID] = []
     var createdWorkstreams: [WorkstreamID] = []
     var notifications: [NotificationRecord] = []
+    var unresolvedAssociations: [AssociationIssue] = []
 }
 
 /// What the UI renders.
 struct TernSnapshot: Hashable, Sendable {
     var workstreams: [Workstream] = []
     var notifications: [NotificationRecord] = []
+    var unresolvedAssociations: [AssociationIssue] = []
 }
 
 enum IngestionError: Error {
@@ -65,7 +67,8 @@ actor IngestionService {
     var snapshot: TernSnapshot {
         TernSnapshot(
             workstreams: persisted.workstreams.compactMap { workstreams[$0.id] },
-            notifications: persisted.notifications
+            notifications: persisted.notifications,
+            unresolvedAssociations: persisted.unresolvedAssociations
         )
     }
 
@@ -75,7 +78,7 @@ actor IngestionService {
         if !isStarted {
             persisted = try store.load()
             seen = Set(persisted.workstreams.flatMap { $0.events.map(\.id) })
-            resolver = WorkstreamResolver(links: persisted.links)
+            resolver = WorkstreamResolver(links: persisted.links, hints: persisted.hints)
             workstreams = Dictionary(uniqueKeysWithValues: persisted.workstreams.map { ($0.id, rebuild($0)) })
             isStarted = true
             publish()
@@ -134,7 +137,9 @@ actor IngestionService {
                 continue
             }
             let workstreamID: WorkstreamID
-            if let resolved = nextResolver.resolve(observed.references) {
+            let placement = nextResolver.place(references: observed.references, candidates: observed.candidates)
+            record(placement.issues, in: &next, report: &report)
+            if let resolved = placement.workstream {
                 workstreamID = resolved
             } else if observed.allowsNewWorkstream {
                 let key = observed.workstreamKey ?? observed.references[0]
@@ -151,17 +156,24 @@ actor IngestionService {
                 report.unlinked.append(observed.id)
                 continue
             }
-            nextResolver.link(observed.references, to: workstreamID)
+            let linkIssues = nextResolver.link(observed.references, candidates: observed.candidates, to: workstreamID)
+            record(linkIssues, in: &next, report: &report)
             guard let index = next.workstreams.firstIndex(where: { $0.id == workstreamID }) else { continue }
             next.workstreams[index].events.append(observed.linked(to: workstreamID))
             if next.workstreams[index].pullRequest == nil, let pullRequest = observed.pullRequest {
                 next.workstreams[index].pullRequest = pullRequest
+            }
+            // A Plane work item is the workstream's identity: it supplies the title too.
+            if next.workstreams[index].planeItem == nil, let planeItem = observed.planeItem {
+                next.workstreams[index].planeItem = planeItem
+                if let title = planeItem.title { next.workstreams[index].title = title }
             }
             nextSeen.insert(observed.id)
             report.accepted.append(observed.id)
             if !touched.contains(workstreamID) { touched.append(workstreamID) }
         }
         next.links = nextResolver.allLinks
+        next.hints = nextResolver.allHints
 
         // Evaluate and decide what is new to the user.
         var rebuilt: [WorkstreamID: Workstream] = [:]
@@ -212,6 +224,15 @@ actor IngestionService {
             pullRequest: record.pullRequest,
             events: record.events
         ))
+    }
+
+    /// Keeps declined associations for diagnostics, without repeats.
+    private func record(_ issues: [AssociationIssue], in state: inout PersistedState, report: inout IngestReport) {
+        for issue in issues where !state.unresolvedAssociations.contains(issue) {
+            state.unresolvedAssociations.append(issue)
+            report.unresolvedAssociations.append(issue)
+        }
+        state.unresolvedAssociations = Array(state.unresolvedAssociations.suffix(PersistedState.unresolvedAssociationLimit))
     }
 
     private func publish() {

@@ -62,12 +62,22 @@ struct WorkstreamFacts: Hashable, Sendable {
         let stamp: Stamp
     }
 
+    struct PlaneState: Hashable, Sendable {
+        let name: String
+        let group: String?
+        let stamp: Stamp
+    }
+
     struct Completion: Hashable, Sendable {
         let reason: String
         let stamp: Stamp
     }
 
     var planeItem: Stamp?
+    /// The item's state in Plane. Describes Plane's lifecycle, not who owns the next action.
+    var planeState: PlaneState?
+    /// Plane says the work is finished (completed, cancelled, archived or removed).
+    var planeClosed: Completion?
     /// Agent sessions keyed by session ID.
     var agentRuns: [String: AgentRun] = [:]
     var pullRequest = PullRequestFacts()
@@ -111,6 +121,11 @@ struct WorkstreamFacts: Hashable, Sendable {
         switch event.kind {
         case .planeItemCreated:
             planeItem = planeItem ?? stamp
+            applyPlaneState(event, stamp: stamp)
+        case .planeItemStateChanged:
+            applyPlaneState(event, stamp: stamp)
+        case .planeItemRemoved:
+            planeClosed = Completion(reason: "Removed from Plane", stamp: stamp)
         case .planeItemBlocked:
             blocked = Blocked(reason: event[.reason], stamp: stamp)
         case .planeItemUnblocked:
@@ -192,6 +207,14 @@ struct WorkstreamFacts: Hashable, Sendable {
                 updated: stamp
             )
         }
+    }
+
+    private mutating func applyPlaneState(_ event: WorkEvent, stamp: Stamp) {
+        guard let name = event[.stateName] else { return }
+        if let current = planeState, Stamp.isOrderedBefore(stamp, current.stamp) { return }
+        let group = event[.stateGroup]
+        planeState = PlaneState(name: name, group: group, stamp: stamp)
+        planeClosed = (group == "completed" || group == "cancelled") ? Completion(reason: "\(name) in Plane", stamp: stamp) : nil
     }
 
     private mutating func complete(_ stamp: Stamp, reason: String) {

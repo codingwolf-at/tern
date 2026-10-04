@@ -17,8 +17,11 @@ struct TernPanel: View {
                 VStack(alignment: .leading, spacing: 14) {
                     section("Back with you", model.backWithYou, empty: "Nothing needs you right now.")
                     section("Waiting", model.waiting, empty: nil)
+                    if !model.notMoving.isEmpty {
+                        compactSection("Not moving", model.notMoving, symbol: "pause", detail: true)
+                    }
                     if !model.done.isEmpty {
-                        doneSection
+                        compactSection("Done", model.done, symbol: "checkmark", detail: false)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -37,6 +40,11 @@ struct TernPanel: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
             }
+            if let plane = model.plane {
+                PlaneDiagnosticsView(account: plane, unresolved: model.unresolvedAssociations)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
             if let player = model.scenarioPlayer {
                 Divider()
                 ScenarioControls(player: player)
@@ -48,7 +56,14 @@ struct TernPanel: View {
                 Divider()
                 GitHubConnectionView(account: github)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, model.plane == nil ? 8 : 4)
+            }
+            if let plane = model.plane {
+                PlaneConnectionView(account: plane)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .padding(.top, model.github == nil ? 8 : 0)
             }
             Divider()
             footer
@@ -100,28 +115,39 @@ struct TernPanel: View {
         }
     }
 
-    private var doneSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            SectionHeader(title: "Done")
-            ForEach(model.done) { workstream in
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark")
+    /// One line per workstream, collapsed behind a disclosure when there are many.
+    private func compactSection(_ title: String, _ workstreams: [Workstream], symbol: String, detail: Bool) -> some View {
+        DisclosureGroup {
+            ForEach(workstreams) { workstream in
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 10)
                     Text(workstream.primaryLabel)
-                        .font(.callout)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(workstream.title)
-                        .font(.callout)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                     Spacer()
+                    if detail {
+                        Text(workstream.status.headline)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
+                .padding(.vertical, 2)
             }
+        } label: {
+            Text("\(title.uppercased()) · \(workstreams.count)")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 8)
     }
 
     private var footer: some View {

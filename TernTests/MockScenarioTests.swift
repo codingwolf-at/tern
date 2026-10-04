@@ -22,7 +22,7 @@ struct MockScenarioTests {
         #expect(workstream.nextOwner == .me)
         #expect(workstream.attention == .high)
         #expect(workstream.status.headline == "Reviewer responded")
-        #expect(workstream.primaryLabel == "PR #421")
+        #expect(workstream.primaryLabel == "PLANE-1842")
         #expect(workstream.calendarContext?.title == "Avatar rollout sync")
         #expect(workstream.agentSessions.first?.agentName == "Claude Code")
     }

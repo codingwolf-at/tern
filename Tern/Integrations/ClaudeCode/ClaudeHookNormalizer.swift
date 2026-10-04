@@ -82,7 +82,8 @@ enum ClaudeHookNormalizer {
             references: [.agentSession(provider: provider, id: session)] + (place.map { [$0.reference] } ?? []),
             suggestedTitle: place?.title,
             workstreamKey: place?.reference,
-            allowsNewWorkstream: allowsNewWorkstream
+            allowsNewWorkstream: allowsNewWorkstream,
+            candidates: payload.gitBranch.map { PlaneIdentifiers.find(in: $0).map(ExternalReference.planeItem) } ?? []
         )
     }
 

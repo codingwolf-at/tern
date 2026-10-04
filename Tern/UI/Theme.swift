@@ -64,14 +64,43 @@ extension WorkEventKind {
 }
 
 extension Workstream {
-    /// The reference that best names this row given what the current status is about.
+    /// The reference that best names this row. A Plane work item is the workstream's identity
+    /// when it has one; otherwise the reference the current status is about.
     var primaryLabel: String {
-        switch status.focus {
+        if let plane = planeItem { return plane.identifier }
+        return switch status.focus {
         case .github: pullRequest?.label ?? planeItem?.identifier ?? title
         case .plane: planeItem?.identifier ?? pullRequest?.label ?? title
         case .agent: planeItem?.identifier ?? pullRequest?.label ?? agentSessions.last?.shortName ?? title
         case .calendar, nil: planeItem?.identifier ?? pullRequest?.label ?? title
         }
+    }
+}
+
+extension Workstream {
+    /// The item's current Plane state name, if Plane reported one.
+    var planeStateName: String? {
+        events.last { $0.source == .plane && $0[.stateName] != nil }?[.stateName]
+    }
+
+    /// Attached contexts beyond the identity: "PR #421 · Claude working · In Review".
+    /// Only for Plane-identified workstreams, where the PR and sessions aren't otherwise named.
+    var contextLine: String? {
+        guard planeItem != nil else { return nil }
+        var parts: [String] = []
+        if let pr = pullRequest { parts.append(pr.label) }
+        if let session = agentSessions.last(where: { $0.status != .ended }) {
+            let status = switch session.status {
+            case .working: "working"
+            case .needsInput: "needs input"
+            case .completed: "finished"
+            case .failed: "stopped"
+            case .idle, .ended: "idle"
+            }
+            parts.append("\(session.shortName) \(status)")
+        }
+        if let state = planeStateName { parts.append(state) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

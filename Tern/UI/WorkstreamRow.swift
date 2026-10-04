@@ -23,6 +23,12 @@ struct WorkstreamRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if let context = workstream.contextLine {
+                    Text(context)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 if isMyTurn, let action = workstream.nextAction {
                     NextActionLine(action: action, tint: workstream.attention.tint)
                         .padding(.top, 3)
@@ -131,6 +137,18 @@ private struct WorkstreamDetail: View {
             }
             if let meeting = workstream.calendarContext {
                 row("Calendar", "\(meeting.title) \(Age.until(meeting.startsAt))")
+            }
+            if let plane = workstream.planeItem {
+                GridRow {
+                    Text("Plane")
+                        .foregroundStyle(.tertiary)
+                        .gridColumnAlignment(.trailing)
+                    if let url = plane.url {
+                        Link("\(plane.identifier) ↗", destination: url)
+                    } else {
+                        Text(plane.identifier).foregroundStyle(.secondary)
+                    }
+                }
             }
             if let pr = workstream.pullRequest {
                 GridRow {

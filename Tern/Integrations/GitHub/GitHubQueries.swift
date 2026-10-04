@@ -42,7 +42,7 @@ enum GitHubQueries {
     }
 
     fragment TernPR on PullRequest {
-      id number title url isDraft state merged createdAt updatedAt
+      id number title body url isDraft state merged createdAt updatedAt
       author { ...TernActor }
       headRefName headRefOid baseRefName
       repository { databaseId nameWithOwner }

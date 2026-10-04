@@ -19,6 +19,10 @@ import Foundation
 /// | Check run                    | `github:check:<check-run-id>:<status-or-conclusion>` |
 /// | Commit status                | `github:status:<node-id>:<state>:<created-at>`  |
 ///
+/// Plane work item identifiers in the head branch (`fix/WEB-9295-…`), the title (`[WEB-9295] …`)
+/// or Plane links in the body are passed along as candidates, strongest first, so the pull
+/// request can join the work item's workstream. The body itself is not kept.
+///
 /// Every event records whether the authenticated user caused it, so the user's own reviews,
 /// comments and resolutions are never mistaken for someone else's response. Bot comments and
 /// reviews are ignored.
@@ -198,6 +202,15 @@ struct GitHubNormalizer: Sendable {
             return normalizer.isMe(reviewer.login)
         }
 
+        /// Plane identifiers this pull request names: branch, then title, then body links.
+        var planeCandidates: [ExternalReference] {
+            var seen: Set<String> = []
+            let identifiers = PlaneIdentifiers.find(in: pr.headRefName)
+                + PlaneIdentifiers.find(in: pr.title)
+                + PlaneIdentifiers.findInLinks(pr.body ?? "")
+            return identifiers.filter { seen.insert($0).inserted }.map(ExternalReference.planeItem)
+        }
+
         func event(
             _ id: EventID,
             _ kind: WorkEventKind,
@@ -218,7 +231,8 @@ struct GitHubNormalizer: Sendable {
                 references: references,
                 suggestedTitle: pr.title,
                 workstreamKey: reference,
-                pullRequest: PullRequestReference(repository: pr.repository.nameWithOwner, number: pr.number, title: pr.title, url: pr.url)
+                pullRequest: PullRequestReference(repository: pr.repository.nameWithOwner, number: pr.number, title: pr.title, url: pr.url),
+                candidates: planeCandidates
             )
         }
 

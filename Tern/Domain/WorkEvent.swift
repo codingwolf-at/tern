@@ -45,6 +45,11 @@ extension WorkEventKind {
     static let planeItemBlocked = WorkEventKind(rawValue: "plane.item.blocked")
     static let planeItemUnblocked = WorkEventKind(rawValue: "plane.item.unblocked")
     static let planeItemCompleted = WorkEventKind(rawValue: "plane.item.completed")
+    /// The item's Plane state or assignment changed. Describes the Plane lifecycle only;
+    /// it never decides who owns the next action.
+    static let planeItemStateChanged = WorkEventKind(rawValue: "plane.item.state_changed")
+    /// Archived, deleted or no longer visible.
+    static let planeItemRemoved = WorkEventKind(rawValue: "plane.item.removed")
 
     // GitHub
     static let pullRequestOpened = WorkEventKind(rawValue: "github.pr.opened")
@@ -138,6 +143,11 @@ struct MetadataKey: RawRepresentable, Hashable, Sendable {
     static let headSHA = MetadataKey(rawValue: "headSHA")
     static let threadID = MetadataKey(rawValue: "threadID")
     static let pullRequestNodeID = MetadataKey(rawValue: "pullRequestNodeID")
+    static let planeItemID = MetadataKey(rawValue: "planeItemID")
+    static let stateName = MetadataKey(rawValue: "stateName")
+    /// Plane state group: `backlog`, `unstarted`, `started`, `completed`, `cancelled`, `triage`.
+    static let stateGroup = MetadataKey(rawValue: "stateGroup")
+    static let assignedToMe = MetadataKey(rawValue: "assignedToMe")
 }
 
 extension WorkEvent {

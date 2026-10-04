@@ -213,6 +213,8 @@ struct GitHubPullRequest: Codable, Sendable, Hashable {
     let id: String
     let number: Int
     let title: String
+    /// Only scanned for Plane links; never stored.
+    let body: String?
     let url: URL
     let isDraft: Bool
     /// `OPEN`, `CLOSED`, `MERGED`.
