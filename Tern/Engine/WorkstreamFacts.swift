@@ -187,6 +187,12 @@ struct WorkstreamFacts: Hashable, Sendable {
     private mutating func updateRun(for event: WorkEvent, stamp: Stamp, status: AgentRun.Status) {
         let sessionID = sessionID(for: event)
         if var run = agentRuns[sessionID] {
+            // A turn reported finished (or failed) again with no new turn in between, e.g. a
+            // second Stop after a Stop hook let Claude continue, is the same outcome, not news.
+            switch (run.status, status) {
+            case (.finished, .finished), (.failed, .failed): return
+            default: break
+            }
             // A start on a turn that is already in progress is a resume, not a new turn.
             let isNewTurn = status == .working && !run.isInProgress
             if isNewTurn {

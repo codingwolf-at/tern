@@ -6,6 +6,14 @@
 // Tern if it isn't running. It never writes to stdout during normal use (Claude Code adds
 // some hooks' stdout to the conversation) and always exits 0 so it can't disrupt a session.
 //
+// The URL is delivered to the Tern.app this helper is embedded in, never to whichever copy
+// LaunchServices prefers, so hooks pointing at /Applications/Tern.app reach that app even
+// when other builds are registered.
+//
+// Options:
+//   --version                print the helper version
+//   --print-target           print the app events are delivered to
+//
 // Environment:
 //   TERN_HOOK_PRINT=1        print the URL instead of opening it (testing)
 //   TERN_HOOK_STATE_DIR=...  where per-session state lives
@@ -21,8 +29,23 @@ let maximumInputBytes = 8 * 1024 * 1024
 
 let environment = ProcessInfo.processInfo.environment
 
+/// The Tern.app containing this helper (`Tern.app/Contents/Helpers/tern-hook`), or `nil`
+/// when the helper runs on its own.
+func containingApp() -> URL? {
+    guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else { return nil }
+    let helpers = executable.deletingLastPathComponent()
+    let app = helpers.deletingLastPathComponent().deletingLastPathComponent()
+    guard helpers.lastPathComponent == "Helpers", app.pathExtension == "app" else { return nil }
+    return app
+}
+
 if CommandLine.arguments.contains("--version") {
     print("tern-hook 1")
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--print-target") {
+    print(containingApp()?.path ?? "(default handler)")
     exit(0)
 }
 
@@ -201,7 +224,9 @@ func deliverDetached(_ url: URL) {
     defer { posix_spawnattr_destroy(&attributes) }
     posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
     // -g: deliver in the background without activating Tern or showing a window.
-    let arguments = ["/usr/bin/open", "-g", url.absoluteString]
+    // -a: to this helper's own app, so another registered build can't intercept the event.
+    let target = containingApp().map { ["-a", $0.path] } ?? []
+    let arguments = ["/usr/bin/open", "-g"] + target + [url.absoluteString]
     var argv = arguments.map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) } }
     var pid: pid_t = 0

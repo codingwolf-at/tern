@@ -1,9 +1,13 @@
 #!/bin/bash
 # Installs, removes or inspects Tern's Claude Code hooks.
 #
-#   scripts/install-claude-hooks.sh install   [--app PATH] [--settings FILE] [--dry-run]
+#   scripts/install-claude-hooks.sh install   [--app PATH] [--settings FILE] [--dry-run] [--allow-dev-path]
 #   scripts/install-claude-hooks.sh uninstall [--settings FILE] [--dry-run]
 #   scripts/install-claude-hooks.sh status    [--settings FILE]
+#
+# Hooks point at the helper inside an installed Release Tern.app (/Applications/Tern.app,
+# then ~/Applications/Tern.app), never at a build folder that a clean build can empty.
+# Run `install` again after upgrading Tern; it replaces Tern's entries in place.
 #
 # Targets user-level settings (${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json) unless
 # --settings is given. Existing hooks are never removed or reordered: Tern's entries are
@@ -16,14 +20,17 @@ mode="${1:-}"
 settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 app=""
 dry_run=0
+allow_dev_path=0
+release_id="so.plane.tern"
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --settings) settings="$2"; shift 2 ;;
         --app) app="$2"; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
+        --allow-dev-path) allow_dev_path=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -38,17 +45,30 @@ esac
 hook_path=""
 if [[ "$mode" == "install" ]]; then
     if [[ -z "$app" ]]; then
-        # Prefer an installed copy, then the newest local build.
         for candidate in "/Applications/Tern.app" "$HOME/Applications/Tern.app"; do
             [[ -d "$candidate" ]] && app="$candidate" && break
         done
+        [[ -z "$app" ]] && {
+            echo "Tern isn't installed in /Applications or ~/Applications." >&2
+            echo "Install it with scripts/install-tern.sh, or pass --app /path/to/Tern.app." >&2
+            exit 1
+        }
     fi
-    if [[ -z "$app" ]]; then
-        app="$(mdfind "kMDItemCFBundleIdentifier == 'so.plane.tern'" 2>/dev/null | grep -v '/Index.noindex/' | head -n 1 || true)"
+    app="${app%/}"
+    [[ -d "$app" ]] || { echo "No app at $app." >&2; exit 1; }
+    if [[ $allow_dev_path -eq 0 && "$app" == */DerivedData/* ]]; then
+        echo "$app is a build output; a clean build would break the hooks." >&2
+        echo "Install Tern with scripts/install-tern.sh, or pass --allow-dev-path." >&2
+        exit 1
     fi
-    [[ -z "$app" ]] && { echo "Couldn't find Tern.app. Pass --app /path/to/Tern.app." >&2; exit 1; }
+    bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
+    if [[ "$bundle_id" != "$release_id" ]]; then
+        echo "$app is ${bundle_id:-not a Tern app}, not the Release build ($release_id)." >&2
+        echo "Debug builds use their own URL scheme and must not receive real hooks." >&2
+        exit 1
+    fi
     hook_path="$app/Contents/Helpers/tern-hook"
-    [[ -x "$hook_path" ]] || { echo "No helper at $hook_path. Build Tern first." >&2; exit 1; }
+    [[ -x "$hook_path" ]] || { echo "No helper at $hook_path. Reinstall Tern." >&2; exit 1; }
     "$hook_path" --version >/dev/null || { echo "Helper at $hook_path doesn't run." >&2; exit 1; }
 fi
 
@@ -108,6 +128,17 @@ function addTern(settings, hookPath, log) {
     }
 }
 
+function ternCommands(settings) {
+    const hooks = settings.hooks || {};
+    const commands = new Set();
+    for (const event of Object.keys(hooks)) {
+        for (const group of hooks[event] || []) {
+            for (const hook of group.hooks || []) if (isTern(hook)) commands.add(hook.command);
+        }
+    }
+    return [...commands];
+}
+
 function ternEvents(settings) {
     const hooks = settings.hooks || {};
     return Object.keys(hooks).filter((e) => (hooks[e] || []).some((g) => (g.hooks || []).some(isTern)));
@@ -124,7 +155,13 @@ function run(argv) {
 
     if (mode === 'status') {
         const events = ternEvents(settings);
-        return events.length ? `Tern hooks installed in ${path}:\n  ${events.join(', ')}` : `No Tern hooks in ${path}.`;
+        if (!events.length) return `No Tern hooks in ${path}.`;
+        const helpers = ternCommands(settings).map((command) => {
+            const helper = command.replace(/^'(.*)'$/, '$1').replace(/'\\''/g, "'");
+            const ok = $.NSFileManager.defaultManager.isExecutableFileAtPath(helper);
+            return `  ${helper} ${ok ? '(ok)' : '(missing: reinstall Tern, then run install again)'}`;
+        });
+        return `Tern hooks installed in ${path}:\n  ${events.join(', ')}\nHelper:\n${helpers.join('\n')}`;
     }
 
     const original = JSON.stringify(settings);
