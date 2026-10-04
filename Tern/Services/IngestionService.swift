@@ -26,6 +26,7 @@ struct TernSnapshot: Hashable, Sendable {
     var workstreams: [Workstream] = []
     var notifications: [NotificationRecord] = []
     var unresolvedAssociations: [AssociationIssue] = []
+    var repositoryImportance: [String: RepositoryImportance] = [:]
 }
 
 enum IngestionError: Error {
@@ -68,7 +69,8 @@ actor IngestionService {
         TernSnapshot(
             workstreams: persisted.workstreams.compactMap { workstreams[$0.id] },
             notifications: persisted.notifications,
-            unresolvedAssociations: persisted.unresolvedAssociations
+            unresolvedAssociations: persisted.unresolvedAssociations,
+            repositoryImportance: persisted.repositoryImportance
         )
     }
 
@@ -115,12 +117,50 @@ actor IngestionService {
         publish()
     }
 
+    /// Whether a source's initial history import has finished (see `ingest(_:importKey:completesImport:)`).
+    func hasCompletedImport(_ key: String) -> Bool {
+        persisted.completedImports.contains(key)
+    }
+
+    /// Ingests events from a source with an initial history import, such as an account.
+    /// Until that import completes, everything is history and stays silent; afterwards events
+    /// are live. Marking the import complete is saved together with the events, so a crash or
+    /// a different build can never see one without the other.
+    @discardableResult
+    func ingest(_ events: [ObservedEvent], importKey: String, completesImport: Bool) throws -> IngestReport {
+        let imported = persisted.completedImports.contains(importKey)
+        return try ingest(events, mode: imported ? .live : .historyImport, completingImport: completesImport && !imported ? importKey : nil)
+    }
+
+    /// Forgets that a source was imported (e.g. on disconnect), so reconnecting imports silently again.
+    func resetImport(_ key: String) throws {
+        guard isStarted, persisted.completedImports.contains(key) else { return }
+        var next = persisted
+        next.completedImports.removeAll { $0 == key }
+        try store.save(next)
+        persisted = next
+    }
+
+    /// Sets how much a repository matters to the user. `normal` removes the override.
+    func setImportance(_ importance: RepositoryImportance, forRepository repository: String) throws {
+        guard isStarted else { throw IngestionError.notStarted }
+        var next = persisted
+        let key = RepositoryImportance.key(forRepository: repository)
+        next.repositoryImportance[key] = importance == .normal ? nil : importance
+        try store.save(next)
+        persisted = next
+        publish()
+    }
+
     /// Ingests a batch of events. Already-seen events are ignored; affected workstreams are
     /// re-evaluated once, and each is compared with what the user was last shown.
     @discardableResult
-    func ingest(_ events: [ObservedEvent], mode: IngestMode = .live) throws -> IngestReport {
+    func ingest(_ events: [ObservedEvent], mode: IngestMode = .live, completingImport importKey: String? = nil) throws -> IngestReport {
         guard isStarted else { throw IngestionError.notStarted }
         var next = persisted
+        if let importKey, !next.completedImports.contains(importKey) {
+            next.completedImports.append(importKey)
+        }
         var nextResolver = resolver
         var nextSeen = seen
         var report = IngestReport()
@@ -203,7 +243,7 @@ actor IngestionService {
         next.notifications = Array(next.notifications.suffix(PersistedState.notificationHistoryLimit))
 
         // Persist, then commit in memory and publish.
-        if !report.accepted.isEmpty {
+        if !report.accepted.isEmpty || next.completedImports != persisted.completedImports {
             try store.save(next)
             persisted = next
             resolver = nextResolver

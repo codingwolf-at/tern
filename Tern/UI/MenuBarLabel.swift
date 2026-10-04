@@ -1,15 +1,15 @@
 import SwiftUI
 
 struct MenuBarLabel: View {
-    let backWithYouCount: Int
+    let needsYouCount: Int
 
     var body: some View {
-        if backWithYouCount > 0 {
+        if needsYouCount > 0 {
             HStack(spacing: 2) {
                 Image(systemName: "bird.fill")
-                Text("\(backWithYouCount)")
+                Text("\(needsYouCount)")
             }
-            .accessibilityLabel("Tern, \(backWithYouCount) back with you")
+            .accessibilityLabel("Tern, \(needsYouCount) need you")
         } else {
             Image(systemName: "bird")
                 .accessibilityLabel("Tern")

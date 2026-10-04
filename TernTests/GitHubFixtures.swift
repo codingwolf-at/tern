@@ -61,8 +61,8 @@ enum GH {
         )
     }
 
-    static func review(_ id: Int, _ state: String, by login: String, at date: Date) -> GitHubPullRequest.Review {
-        .init(databaseId: id, state: state, submittedAt: date, author: user(login))
+    static func review(_ id: Int, _ state: String, by login: String, at date: Date, on commit: String? = nil) -> GitHubPullRequest.Review {
+        .init(databaseId: id, state: state, submittedAt: date, author: user(login), commit: commit.map { .init(oid: $0) })
     }
 
     static func comment(_ id: Int, by login: String, at date: Date) -> GitHubPullRequest.Comment {
@@ -219,19 +219,9 @@ final class FakeGitHubCLI: GitHubCLIRunner, @unchecked Sendable {
     }
 }
 
-final class InMemoryBookmarks: GitHubSyncBookmarks, @unchecked Sendable {
-    private let lock = NSLock()
-    private var logins: Set<String> = []
-
-    func hasImported(_ login: String) -> Bool { lock.withLock { logins.contains(login.lowercased()) } }
-    func markImported(_ login: String) { lock.withLock { _ = logins.insert(login.lowercased()) } }
-    func clear() { lock.withLock { logins.removeAll() } }
-}
-
 /// Sync service wired to a fake `gh` and an in-memory ingestion service.
 struct GitHubHarness {
     let github: FakeGitHubCLI
-    let bookmarks: InMemoryBookmarks
     let store: InMemoryTernStore
     let ingestion: IngestionService
     let sync: GitHubSyncService
@@ -240,22 +230,21 @@ struct GitHubHarness {
         let store = InMemoryTernStore()
         let ingestion = IngestionService(store: store, now: { GH.t0 })
         try await ingestion.start()
-        self.init(github: FakeGitHubCLI(), bookmarks: InMemoryBookmarks(), store: store, ingestion: ingestion)
+        self.init(github: FakeGitHubCLI(), store: store, ingestion: ingestion)
     }
 
     /// The same GitHub and store, as if Tern relaunched.
     func relaunched() async throws -> GitHubHarness {
         let ingestion = IngestionService(store: store, now: { GH.t0 })
         try await ingestion.start()
-        return GitHubHarness(github: github, bookmarks: bookmarks, store: store, ingestion: ingestion)
+        return GitHubHarness(github: github, store: store, ingestion: ingestion)
     }
 
-    private init(github: FakeGitHubCLI, bookmarks: InMemoryBookmarks, store: InMemoryTernStore, ingestion: IngestionService) {
+    private init(github: FakeGitHubCLI, store: InMemoryTernStore, ingestion: IngestionService) {
         self.github = github
-        self.bookmarks = bookmarks
         self.store = store
         self.ingestion = ingestion
-        self.sync = GitHubSyncService(cli: GitHubCLI(runner: github, now: { GH.t0 }), ingestion: ingestion, bookmarks: bookmarks, now: { GH.t0 })
+        self.sync = GitHubSyncService(cli: GitHubCLI(runner: github, now: { GH.t0 }), ingestion: ingestion, now: { GH.t0 })
     }
 
     func workstream(_ title: String = "Avatar migration") async -> Workstream? {

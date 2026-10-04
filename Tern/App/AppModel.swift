@@ -48,6 +48,8 @@ final class AppModel {
     /// DEBUG builds run in memory with the mock scenario (set `TERN_MOCK=0` to start empty and
     /// see only real Claude Code sessions); release builds load persisted state.
     static func makeDefault() -> AppModel {
+        // Import progress now lives in the persisted state; drop the old build-shared marker.
+        UserDefaults.standard.removeObject(forKey: "github.importedLogins")
         #if DEBUG
         let service = IngestionService(store: InMemoryTernStore())
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
@@ -69,34 +71,79 @@ final class AppModel {
         #endif
     }
 
-    // MARK: - Groupings
+    // MARK: - Queue
 
-    /// Workstreams where the next action is mine, loudest and most recent first.
-    var backWithYou: [Workstream] {
-        workstreams
-            .filter { $0.nextOwner == .me && $0.state != .complete }
-            .sorted { lhs, rhs in
-                if lhs.attention != rhs.attention { return lhs.attention > rhs.attention }
-                return (lhs.lastMeaningfulChange ?? .distantPast) > (rhs.lastMeaningfulChange ?? .distantPast)
-            }
+    /// At most this many items interrupt at the top of the panel.
+    static let needsYouLimit = 3
+    /// Waiting items shown before the rest collapse.
+    static let waitingLimit = 4
+
+    private(set) var importance: [String: RepositoryImportance] = [:]
+    /// The clock used for recency and "today"; injectable for tests.
+    var now: @Sendable () -> Date = { .now }
+
+    func importance(of workstream: Workstream) -> RepositoryImportance {
+        workstream.repositoryKey.flatMap { importance[$0] } ?? .normal
     }
 
-    /// Workstreams someone or something else is moving forward.
+    func priority(of workstream: Workstream) -> Priority {
+        PriorityModel.priority(of: workstream, importance: importance(of: workstream), now: now())
+    }
+
+    private func ranked(_ workstreams: [Workstream]) -> [Workstream] {
+        PriorityModel.ranked(workstreams, importance: importance(of:), now: now())
+    }
+
+    /// Everything that warrants an interruption, best first. Muted repositories never interrupt.
+    var attentionQueue: [Workstream] {
+        ranked(workstreams.filter { $0.needsAttentionNow && importance(of: $0) != .muted })
+    }
+
+    /// The few things worth dealing with now.
+    var needsYou: [Workstream] {
+        Array(attentionQueue.prefix(Self.needsYouLimit))
+    }
+
+    /// Lower-priority items that would also warrant attention, kept out of the way.
+    var more: [Workstream] {
+        Array(attentionQueue.dropFirst(Self.needsYouLimit))
+            + ranked(workstreams.filter { $0.needsAttentionNow && importance(of: $0) == .muted })
+    }
+
+    /// Someone else (a reviewer, CI, an author) owes the next step.
     var waiting: [Workstream] {
-        workstreams
-            .filter { $0.nextOwner != .me && $0.nextOwner != .none && $0.state != .complete }
-            .sorted { ($0.lastMeaningfulChange ?? .distantPast) > ($1.lastMeaningfulChange ?? .distantPast) }
+        ranked(workstreams.filter { [.reviewer, .ci, .external].contains($0.nextOwner) && $0.state != .complete })
     }
 
-    /// Open work nobody is moving right now (e.g. a Plane item with no PR or session yet).
-    var notMoving: [Workstream] {
-        workstreams
-            .filter { $0.nextOwner == .none && $0.state != .complete }
-            .sorted { ($0.lastMeaningfulChange ?? .distantPast) > ($1.lastMeaningfulChange ?? .distantPast) }
+    /// An agent is working on it right now.
+    var active: [Workstream] {
+        ranked(workstreams.filter { $0.nextOwner == .agent && $0.state != .complete })
     }
 
-    var done: [Workstream] {
-        workstreams.filter { $0.state == .complete }
+    /// Yours, but nothing to interrupt for: drafts, PRs without reviewers, planned items
+    /// nobody has started.
+    var yourWork: [Workstream] {
+        ranked(workstreams.filter { workstream in
+            guard workstream.state != .complete else { return false }
+            if workstream.nextOwner == .none { return true }
+            return workstream.nextOwner == .me && !workstream.needsAttentionNow
+        })
+    }
+
+    /// Finished today. Older completed work stays in history but out of the panel.
+    var doneToday: [Workstream] {
+        let calendar = Calendar.current
+        let today = now()
+        return workstreams.filter { workstream in
+            guard workstream.state == .complete, let changed = workstream.lastMeaningfulChange else { return false }
+            return calendar.isDate(changed, inSameDayAs: today)
+        }
+    }
+
+    /// Marks how much a repository matters. Saved with Tern's state.
+    func setImportance(_ value: RepositoryImportance, for workstream: Workstream) {
+        guard let repository = workstream.pullRequest?.repository else { return }
+        Task { [service] in try? await service.setImportance(value, forRepository: repository) }
     }
 
     // MARK: - Service
@@ -116,6 +163,7 @@ final class AppModel {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams
                 self.unresolvedAssociations = snapshot.unresolvedAssociations
+                self.importance = snapshot.repositoryImportance
             }
         }
     }

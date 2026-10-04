@@ -13,6 +13,11 @@ struct PersistedState: Hashable, Sendable, Codable {
     var hints: [WorkstreamHint] = []
     /// Associations declined as ambiguous or conflicting, newest last.
     var unresolvedAssociations: [AssociationIssue] = []
+    /// Sources whose initial history import has finished, e.g. `github:octocat`. Lives with the
+    /// events it describes, so the two can never disagree.
+    var completedImports: [String] = []
+    /// How much each repository matters to the user (`github.com/owner/name` → importance).
+    var repositoryImportance: [String: RepositoryImportance] = [:]
     /// The last transition surfaced to the user for each workstream.
     var shownTransitions: [ShownTransition] = []
     /// Most recent notifications, newest last.
@@ -22,7 +27,7 @@ struct PersistedState: Hashable, Sendable, Codable {
     static let unresolvedAssociationLimit = 50
 
     enum CodingKeys: String, CodingKey {
-        case version, workstreams, links, hints, unresolvedAssociations, shownTransitions, notifications
+        case version, workstreams, links, hints, unresolvedAssociations, completedImports, repositoryImportance, shownTransitions, notifications
     }
 
     init() {}
@@ -35,6 +40,8 @@ struct PersistedState: Hashable, Sendable, Codable {
         links = try container.decode([WorkstreamLink].self, forKey: .links)
         hints = try container.decodeIfPresent([WorkstreamHint].self, forKey: .hints) ?? []
         unresolvedAssociations = try container.decodeIfPresent([AssociationIssue].self, forKey: .unresolvedAssociations) ?? []
+        completedImports = try container.decodeIfPresent([String].self, forKey: .completedImports) ?? []
+        repositoryImportance = try container.decodeIfPresent([String: RepositoryImportance].self, forKey: .repositoryImportance) ?? [:]
         shownTransitions = try container.decode([ShownTransition].self, forKey: .shownTransitions)
         notifications = try container.decode([NotificationRecord].self, forKey: .notifications)
     }

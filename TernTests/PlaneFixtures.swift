@@ -128,7 +128,6 @@ final class InMemoryPlaneCredentials: PlaneCredentialStore, @unchecked Sendable 
 struct PlaneHarness {
     let plane = PlaneStub()
     let credentials: InMemoryPlaneCredentials
-    let bookmarks = InMemoryBookmarks()
     let store = InMemoryTernStore()
     let ingestion: IngestionService
     let sync: PlaneSyncService
@@ -137,7 +136,7 @@ struct PlaneHarness {
         credentials = InMemoryPlaneCredentials(token.map { ["plane": $0] } ?? [:])
         ingestion = IngestionService(store: store, now: { PL.t0 })
         try await ingestion.start()
-        sync = PlaneSyncService(credentials: credentials, http: plane, ingestion: ingestion, bookmarks: bookmarks, now: { PL.at(60) })
+        sync = PlaneSyncService(credentials: credentials, http: plane, ingestion: ingestion, now: { PL.at(60) })
         await sync.configure(PL.workspace)
     }
 

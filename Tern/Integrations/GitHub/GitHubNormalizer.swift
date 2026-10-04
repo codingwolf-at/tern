@@ -116,7 +116,7 @@ struct GitHubNormalizer: Sendable {
                 kind,
                 at: submitted,
                 actor: author.login,
-                [.reviewer: author.login]
+                review.commit.map { [.reviewer: author.login, .headSHA: $0.oid] } ?? [.reviewer: author.login]
             ))
         }
 

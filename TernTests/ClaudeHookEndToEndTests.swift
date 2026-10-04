@@ -53,24 +53,24 @@ struct ClaudeHookEndToEndTests {
         #expect(!raw.contains("transcript"))
 
         await model.claudeHooks.handle(start)
-        try await waitUntil { model.waiting.first?.status.headline == "Claude working" }
+        try await waitUntil { model.active.first?.status.headline == "Claude working" }
 
         // No PostToolUse is forwarded until an input request is outstanding.
         #expect(try runHelper(hook("PostToolUse", #","tool_name":"Bash""#)) == nil)
 
         let permission = try #require(try runHelper(hook("Notification", #","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash""#)))
         await model.claudeHooks.handle(permission)
-        try await waitUntil { model.backWithYou.first?.status.headline == "Claude needs your input" }
-        #expect(model.backWithYou.first?.attention == .high)
-        #expect(model.backWithYou.first?.title == "ü")
+        try await waitUntil { model.needsYou.first?.status.headline == "Claude needs your input" }
+        #expect(model.needsYou.first?.attention == .high)
+        #expect(model.needsYou.first?.title == "ü")
 
         let resumed = try #require(try runHelper(hook("PostToolUse", #","tool_name":"Bash""#)))
         await model.claudeHooks.handle(resumed)
-        try await waitUntil { model.backWithYou.isEmpty && model.waiting.first?.nextOwner == .agent }
+        try await waitUntil { model.needsYou.isEmpty && model.active.first?.nextOwner == .agent }
 
         let stop = try #require(try runHelper(hook("Stop", #","last_assistant_message":"secret answer""#)))
         await model.claudeHooks.handle(stop)
-        try await waitUntil { model.backWithYou.first?.status.headline == "Claude finished" }
+        try await waitUntil { model.needsYou.first?.status.headline == "Claude finished" }
 
         // Re-delivery of the same URL changes nothing.
         let report = await model.claudeHooks.handle(stop)
@@ -90,7 +90,7 @@ struct ClaudeHookEndToEndTests {
         router.open(urls)
         router.start { await model.claudeHooks.handle($0) }
 
-        try await waitUntil { model.backWithYou.first?.status.headline == "Claude finished" }
+        try await waitUntil { model.needsYou.first?.status.headline == "Claude finished" }
         #expect(model.claudeHooks.activity.received == 2)
     }
 

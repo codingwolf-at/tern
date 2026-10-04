@@ -195,11 +195,12 @@ struct PlaneSyncTests {
 @MainActor
 struct PlaneAccountTests {
     private func account(_ credentials: InMemoryPlaneCredentials, _ plane: PlaneStub, defaults: UserDefaults) -> PlaneAccount {
-        PlaneAccount(
-            ingestion: IngestionService(store: InMemoryTernStore()),
+        let ingestion = IngestionService(store: InMemoryTernStore())
+        Task { try? await ingestion.start() }
+        return PlaneAccount(
+            ingestion: ingestion,
             credentials: credentials,
             http: plane,
-            bookmarks: InMemoryBookmarks(),
             defaults: defaults,
             startSyncing: false,
             now: { PL.t0 }

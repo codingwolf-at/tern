@@ -24,6 +24,8 @@ struct PullRequestFacts: Hashable, Sendable {
         /// Latest approval or change request. A plain comment review doesn't replace it.
         var verdict: Verdict?
         var verdictStamp: Stamp?
+        /// The head commit the verdict was given on, when known.
+        var verdictCommit: String?
     }
 
     /// Feedback from someone else that may need a reply.
@@ -111,9 +113,11 @@ struct PullRequestFacts: Hashable, Sendable {
                 case .changesRequested:
                     state.verdict = .changesRequested(comments: event[.commentCount].flatMap { Int($0) })
                     state.verdictStamp = stamp
+                    state.verdictCommit = event[.headSHA]
                 case .reviewApproved:
                     state.verdict = .approved
                     state.verdictStamp = stamp
+                    state.verdictCommit = event[.headSHA]
                 default:
                     incoming.append(IncomingComment(stamp: stamp, count: event[.commentCount].flatMap { Int($0) } ?? 1, threadID: nil))
                 }
@@ -175,6 +179,15 @@ struct PullRequestFacts: Hashable, Sendable {
         let pending = checks.filter { $0.status == .pending }
         if !pending.isEmpty { return .running(pending: pending.count, total: checks.count, latest(pending)) }
         return .passed(latest(checks))
+    }
+
+    /// Whether a verdict still describes the code: given on the current head commit, or (when
+    /// commits aren't known) not followed by a push.
+    func isCurrent(_ reviewer: Reviewer) -> Bool {
+        if let commit = reviewer.verdictCommit, let headSHA { return commit == headSHA }
+        guard let stamp = reviewer.verdictStamp else { return false }
+        guard let push = lastPush else { return true }
+        return Stamp.isOrderedBefore(push, stamp)
     }
 
     /// Reviewers with an outstanding request, in a stable order.

@@ -25,7 +25,7 @@ struct GitHubSyncTests {
         #expect(await h.notificationCount() == 0)
         #expect(await h.workstream()?.attention == .high)
         #expect(await h.workstream("Rate limiter")?.nextOwner == .me)
-        #expect(h.bookmarks.hasImported(GH.me))
+        #expect(await h.ingestion.hasCompletedImport("github:atul"))
     }
 
     @Test("Queries go through `gh api graphql` with the body on stdin")
@@ -318,10 +318,11 @@ struct GitHubAccountTests {
     private func account(_ configure: (FakeGitHubCLI) -> Void) async throws -> GitHubAccount {
         let fake = FakeGitHubCLI()
         configure(fake)
+        let ingestion = IngestionService(store: InMemoryTernStore())
+        try await ingestion.start()
         let account = GitHubAccount(
-            ingestion: IngestionService(store: InMemoryTernStore()),
+            ingestion: ingestion,
             cli: GitHubCLI(runner: fake),
-            bookmarks: InMemoryBookmarks(),
             startSyncing: false
         )
         account.refresh()

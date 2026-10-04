@@ -131,6 +131,7 @@ private struct WorkstreamDetail: View {
             row("Owner", workstream.nextOwner.displayName)
             if let action = workstream.nextAction {
                 row("Why", action.reason)
+                row("Next", action.title)
             }
             if !links.isEmpty {
                 row("Links", links.joined(separator: " · "))

@@ -21,6 +21,17 @@ struct AttentionDecision: Hashable, Sendable, Codable {
     let nextOwner: Owner
     let attention: AttentionLevel
     let nextAction: NextAction?
+    /// Why it's the user's move, when it is.
+    let reason: AttentionReason?
+
+    init(shouldNotify: Bool, state: WorkstreamState, nextOwner: Owner, attention: AttentionLevel, nextAction: NextAction?, reason: AttentionReason? = nil) {
+        self.shouldNotify = shouldNotify
+        self.state = state
+        self.nextOwner = nextOwner
+        self.attention = attention
+        self.nextAction = nextAction
+        self.reason = reason
+    }
 
     /// Decision for a workstream with no history yet.
     static let initial = AttentionDecision(
@@ -32,7 +43,7 @@ struct AttentionDecision: Hashable, Sendable, Codable {
     )
 
     func with(shouldNotify: Bool) -> AttentionDecision {
-        AttentionDecision(shouldNotify: shouldNotify, state: state, nextOwner: nextOwner, attention: attention, nextAction: nextAction)
+        AttentionDecision(shouldNotify: shouldNotify, state: state, nextOwner: nextOwner, attention: attention, nextAction: nextAction, reason: reason)
     }
 
     /// Whether two decisions differ in a way the user would care about (ignores `shouldNotify`).

@@ -21,7 +21,6 @@ final class PlaneAccount {
 
     private let service: PlaneSyncService
     private let credentials: any PlaneCredentialStore
-    private let bookmarks: any GitHubSyncBookmarks
     private let defaults: UserDefaults
     private static let workspaceKey = "plane.workspace"
 
@@ -29,16 +28,14 @@ final class PlaneAccount {
         ingestion: IngestionService,
         credentials: any PlaneCredentialStore = KeychainPlaneCredentialStore(),
         http: any PlaneHTTP = URLSessionPlaneHTTP(),
-        bookmarks: any GitHubSyncBookmarks = UserDefaultsSyncBookmarks(),
         defaults: UserDefaults = .standard,
         interval: TimeInterval = PlaneSyncService.defaultInterval,
         startSyncing: Bool = true,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.credentials = credentials
-        self.bookmarks = bookmarks
         self.defaults = defaults
-        service = PlaneSyncService(credentials: credentials, http: http, ingestion: ingestion, bookmarks: bookmarks, interval: interval, now: now)
+        service = PlaneSyncService(credentials: credentials, http: http, ingestion: ingestion, interval: interval, now: now)
 
         let workspace = defaults.data(forKey: Self.workspaceKey).flatMap { try? JSONDecoder().decode(PlaneWorkspace.self, from: $0) }
         Task { [weak self, service] in
@@ -106,6 +103,7 @@ final class PlaneAccount {
         let workspace = sync.workspace
         Task { [service, credentials] in
             await service.stop()
+            await service.forgetImport()
             if let workspace { try? credentials.delete(for: workspace) }
             await service.configure(nil)
         }

@@ -1,30 +1,6 @@
 import Foundation
 import os
 
-/// Remembers which accounts have finished their first (silent) import. Not secret.
-protocol GitHubSyncBookmarks: Sendable {
-    func hasImported(_ login: String) -> Bool
-    func markImported(_ login: String)
-    func clear()
-}
-
-struct UserDefaultsSyncBookmarks: GitHubSyncBookmarks {
-    private let key = "github.importedLogins"
-
-    func hasImported(_ login: String) -> Bool {
-        (UserDefaults.standard.stringArray(forKey: key) ?? []).contains(login.lowercased())
-    }
-
-    func markImported(_ login: String) {
-        let logins = Set(UserDefaults.standard.stringArray(forKey: key) ?? []).union([login.lowercased()])
-        UserDefaults.standard.set(logins.sorted(), forKey: key)
-    }
-
-    func clear() {
-        UserDefaults.standard.removeObject(forKey: key)
-    }
-}
-
 /// Polls GitHub through the GitHub CLI and feeds normalized events into ingestion. Runs off
 /// the main actor; the UI only sees published `Status` values and ingestion snapshots.
 ///
@@ -80,7 +56,6 @@ actor GitHubSyncService {
 
     private let cli: GitHubCLI
     private let ingestion: IngestionService
-    private let bookmarks: any GitHubSyncBookmarks
     private let interval: TimeInterval
     private let now: @Sendable () -> Date
     private let logger = Logger(subsystem: "so.plane.tern", category: "github")
@@ -95,13 +70,11 @@ actor GitHubSyncService {
     init(
         cli: GitHubCLI,
         ingestion: IngestionService,
-        bookmarks: any GitHubSyncBookmarks,
         interval: TimeInterval = GitHubSyncService.defaultInterval,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.cli = cli
         self.ingestion = ingestion
-        self.bookmarks = bookmarks
         self.interval = interval
         self.now = now
         (statusUpdates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -247,14 +220,10 @@ actor GitHubSyncService {
             }
         }
 
-        // 3. Normalize and ingest. The first sync of an account is history: silent.
+        // 3. Normalize and ingest. Until the account's first full sync completes, it's history: silent.
         let normalizer = GitHubNormalizer(viewerLogin: login)
         let events = details.flatMap { normalizer.events(for: $0, requestedViaSearch: requestedIDs.contains($0.id)) }
-        let firstImport = !bookmarks.hasImported(login)
-        if !events.isEmpty {
-            try await ingestion.ingest(events, mode: firstImport ? .historyImport : .live)
-        }
-        if completed { bookmarks.markImported(login) }
+        try await ingestion.ingest(events, importKey: Self.importKey(login), completesImport: completed)
         for pr in details {
             if let fingerprint = candidates[pr.id]?.fingerprint { fingerprints[pr.id] = fingerprint }
         }
@@ -262,6 +231,10 @@ actor GitHubSyncService {
         status.lastSync = now()
         status.lastError = problems.isEmpty ? nil : "\(problems.count) partial error\(problems.count == 1 ? "" : "s"): \(problems[0])"
         logger.debug("GitHub sync: \(candidates.count) PRs, \(changed.count) changed, \(events.count) events")
+    }
+
+    static func importKey(_ login: String) -> String {
+        "github:\(login.lowercased())"
     }
 
     /// Open pull requests Tern already tracks, so closures and merges are noticed even

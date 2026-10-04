@@ -31,10 +31,12 @@ struct OwnershipResolver: Sendable {
         let nextAction: NextAction?
         let status: StatusLine
         let cause: Stamp?
+        var reason: AttentionReason?
     }
 
     private struct Claim {
         let attention: AttentionLevel
+        let reason: AttentionReason
         let cause: Stamp
         let action: NextAction
         let status: StatusLine
@@ -62,7 +64,8 @@ struct OwnershipResolver: Sendable {
                 attention: claim.attention,
                 nextAction: claim.action,
                 status: claim.status,
-                cause: claim.cause
+                cause: claim.cause,
+                reason: claim.reason
             )
         }
 
@@ -105,7 +108,8 @@ struct OwnershipResolver: Sendable {
                 attention: .low,
                 nextAction: NextAction(title: "Request a review", reason: "Pull request has no reviewer yet", estimatedMinutes: 2),
                 status: StatusLine(headline: "PR open", detail: "No reviewer yet", focus: .github),
-                cause: opened
+                cause: opened,
+                reason: .needsReviewer
             )
         }
         if let created = facts.planeItem, let plane = facts.planeState {
@@ -126,7 +130,8 @@ struct OwnershipResolver: Sendable {
                 attention: .low,
                 nextAction: NextAction(title: "Start work", reason: "Work item is ready to pick up"),
                 status: StatusLine(headline: "Ready to start", focus: .plane),
-                cause: created
+                cause: created,
+                reason: .readyToStart
             )
         }
 
@@ -166,6 +171,7 @@ struct OwnershipResolver: Sendable {
             case .needsInput(let prompt):
                 claims.append(Claim(
                     attention: .high,
+                    reason: .agentNeedsInput,
                     cause: run.updated,
                     action: NextAction(title: "Answer \(run.shortName)", reason: "\(run.name) is waiting for input", estimatedMinutes: 2),
                     status: StatusLine(headline: "\(run.shortName) needs your input", detail: prompt, focus: .agent)
@@ -173,6 +179,7 @@ struct OwnershipResolver: Sendable {
             case .finished where !run.isAcknowledged:
                 claims.append(Claim(
                     attention: .medium,
+                    reason: .agentCompleted,
                     cause: run.updated,
                     action: NextAction(title: "Review \(run.shortName)'s changes", reason: "\(run.name) finished its run", estimatedMinutes: 10),
                     status: StatusLine(headline: "\(run.shortName) finished", focus: .agent)
@@ -180,6 +187,7 @@ struct OwnershipResolver: Sendable {
             case .failed(let reason) where !run.isAcknowledged:
                 claims.append(Claim(
                     attention: .high,
+                    reason: .agentFailed,
                     cause: run.updated,
                     action: NextAction(title: "Check on \(run.shortName)", reason: reason ?? "\(run.name) stopped before finishing", estimatedMinutes: 5),
                     status: StatusLine(headline: "\(run.shortName) stopped", detail: reason, focus: .agent)
@@ -205,6 +213,7 @@ struct OwnershipResolver: Sendable {
             let label = names.count == 1 ? names[0] : "\(names.count) checks"
             claims.append(Claim(
                 attention: .high,
+                reason: .ciFailed,
                 cause: stamp,
                 action: NextAction(title: "Fix failing CI", reason: "\(label) failed", estimatedMinutes: 15),
                 status: StatusLine(headline: "CI failed", detail: names.joined(separator: ", "), focus: .github)
@@ -220,13 +229,15 @@ struct OwnershipResolver: Sendable {
             if let push = pr.lastPush, Stamp.isOrderedBefore(stamp, push) {
                 claims.append(Claim(
                     attention: .low,
+                    reason: .changesPushed,
                     cause: push,
-                    action: NextAction(title: "Re-request review from \(name)", reason: "Changes pushed since \(name)'s review", estimatedMinutes: 1),
+                    action: NextAction(title: "Re-request review from \(name)", reason: "You pushed changes after \(name)'s change request", estimatedMinutes: 1),
                     status: StatusLine(headline: "Changes pushed", detail: "Re-request \(name)'s review", focus: .github)
                 ))
             } else {
                 claims.append(Claim(
                     attention: .high,
+                    reason: .changesRequested,
                     cause: stamp,
                     action: NextAction(title: "Address requested changes", reason: "\(name) requested changes", estimatedMinutes: 30),
                     status: StatusLine(headline: "Changes requested", detail: commentSummary(comments), focus: .github)
@@ -238,32 +249,49 @@ struct OwnershipResolver: Sendable {
         if let latest = unanswered.map(\.stamp).max(by: Stamp.isOrderedBefore) {
             claims.append(Claim(
                 attention: .high,
+                reason: .reviewerResponded,
                 cause: latest,
                 action: NextAction(title: "Reply to review", reason: "New feedback on your pull request", estimatedMinutes: 10),
                 status: StatusLine(headline: "Reviewer responded", detail: commentSummary(unanswered.reduce(0) { $0 + $1.count }), focus: .github)
             ))
         }
 
+        // Merge only on evidence about the code as it is now: approvals on the current head,
+        // CI green or absent, nothing outstanding, and no agent still changing the branch.
         let approvals = pr.reviewers.filter { $0.value.verdict == .approved }
-        if let approved = approvals.compactMap(\.value.verdictStamp).max(by: Stamp.isOrderedBefore),
-           !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !pr.isDraft {
+        let current = approvals.filter { pr.isCurrent($0.value) }
+        let agentActive = facts.agentRuns.values.contains(where: \.isInProgress)
+        if let approved = current.compactMap(\.value.verdictStamp).max(by: Stamp.isOrderedBefore),
+           !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !pr.isDraft, !agentActive {
             switch pr.ci {
             case .unknown, .passed:
-                let names = approvals.keys.sorted().joined(separator: ", ")
+                let names = current.keys.sorted().joined(separator: ", ")
                 claims.append(Claim(
                     attention: .medium,
+                    reason: .approvedReadyToMerge,
                     cause: approved,
-                    action: NextAction(title: "Merge", reason: "Approved by \(names)", estimatedMinutes: 2),
+                    action: NextAction(title: "Merge", reason: "\(names) approved the current head", estimatedMinutes: 2),
                     status: StatusLine(headline: "Approved", detail: "Ready to merge", focus: .github)
                 ))
             case .running, .failed:
                 break
             }
+        } else if current.isEmpty, !approvals.isEmpty, !hasOutstandingChanges, pr.pendingReviewers.isEmpty, !agentActive,
+                  let push = pr.lastPush {
+            let names = approvals.keys.sorted().joined(separator: ", ")
+            claims.append(Claim(
+                attention: .low,
+                reason: .approvalOutdated,
+                cause: push,
+                action: NextAction(title: "Re-request review from \(names)", reason: "New commits since \(names) approved", estimatedMinutes: 1),
+                status: StatusLine(headline: "Approval outdated", detail: "New commits since approval", focus: .github)
+            ))
         }
 
         if pr.isDraft, let opened = pr.opened {
             claims.append(Claim(
                 attention: .low,
+                reason: .draft,
                 cause: opened,
                 action: NextAction(title: "Mark ready for review", reason: "Pull request is a draft", estimatedMinutes: 1),
                 status: StatusLine(headline: "Draft", focus: .github)
@@ -277,6 +305,7 @@ struct OwnershipResolver: Sendable {
         guard let requested = pr.owesMyReview else { return [] }
         return [Claim(
             attention: .high,
+            reason: .reviewRequested,
             cause: requested,
             action: NextAction(title: "Review", reason: "\(pr.author ?? "The author") asked for your review", estimatedMinutes: 20),
             status: StatusLine(headline: "Review requested", detail: pr.author.map { "From \($0)" }, focus: .github)

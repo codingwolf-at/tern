@@ -40,7 +40,8 @@ struct AttentionEngine: Sendable {
                 state: resolution.state,
                 nextOwner: resolution.owner,
                 attention: resolution.attention,
-                nextAction: resolution.nextAction
+                nextAction: resolution.nextAction,
+                reason: resolution.reason
             )
             let changed = decision.isMeaningfullyDifferent(from: evaluation.decision)
             evaluation = WorkstreamEvaluation(

@@ -61,7 +61,6 @@ actor PlaneSyncService {
     private let credentials: any PlaneCredentialStore
     private let http: any PlaneHTTP
     private let ingestion: IngestionService
-    private let bookmarks: any GitHubSyncBookmarks
     private let interval: TimeInterval
     private let now: @Sendable () -> Date
     private let logger = Logger(subsystem: "so.plane.tern", category: "plane")
@@ -78,14 +77,12 @@ actor PlaneSyncService {
         credentials: any PlaneCredentialStore,
         http: any PlaneHTTP,
         ingestion: IngestionService,
-        bookmarks: any GitHubSyncBookmarks,
         interval: TimeInterval = PlaneSyncService.defaultInterval,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.credentials = credentials
         self.http = http
         self.ingestion = ingestion
-        self.bookmarks = bookmarks
         self.interval = interval
         self.now = now
         (statusUpdates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -215,14 +212,20 @@ actor PlaneSyncService {
 
         let changed = (open + followUps).filter { fingerprints[$0.id] != $0.fingerprint }
         let events = changed.flatMap(normalizer.events(for:)) + removals
-        let account = "plane:\(workspace.slug):\(user.id)"
-        if !events.isEmpty {
-            try await ingestion.ingest(events, mode: bookmarks.hasImported(account) ? .live : .historyImport)
-        }
-        bookmarks.markImported(account)
+        try await ingestion.ingest(events, importKey: Self.importKey(workspace: workspace, userID: user.id), completesImport: true)
         for item in changed { fingerprints[item.id] = item.fingerprint }
         status.lastSync = now()
         status.lastError = nil
+    }
+
+    static func importKey(workspace: PlaneWorkspace, userID: String) -> String {
+        "plane:\(workspace.slug):\(userID)"
+    }
+
+    /// Forgets the current account's import, so a reconnect imports silently again.
+    func forgetImport() async {
+        guard let workspace, let user else { return }
+        try? await ingestion.resetImport(Self.importKey(workspace: workspace, userID: user.id))
     }
 
     /// Plane items Tern tracks in this workspace that aren't finished.

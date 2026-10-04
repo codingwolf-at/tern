@@ -15,13 +15,20 @@ struct TernPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    section("Back with you", model.backWithYou, empty: "Nothing needs you right now.")
-                    section("Waiting", model.waiting, empty: nil)
-                    if !model.notMoving.isEmpty {
-                        compactSection("Not moving", model.notMoving, symbol: "pause", detail: true)
+                    section("Needs you", model.needsYou, empty: "Nothing needs you right now.")
+                    if !model.more.isEmpty {
+                        compactSection("More", model.more, symbol: "circle.fill", detail: true)
                     }
-                    if !model.done.isEmpty {
-                        compactSection("Done", model.done, symbol: "checkmark", detail: false)
+                    section("Waiting", Array(model.waiting.prefix(AppModel.waitingLimit)), empty: nil)
+                    if model.waiting.count > AppModel.waitingLimit {
+                        compactSection("More waiting", Array(model.waiting.dropFirst(AppModel.waitingLimit)), symbol: "circle", detail: true)
+                    }
+                    section("Active", model.active, empty: nil)
+                    if !model.yourWork.isEmpty {
+                        compactSection("Your other work", model.yourWork, symbol: "minus", detail: true)
+                    }
+                    if !model.doneToday.isEmpty {
+                        compactSection("Done today", model.doneToday, symbol: "checkmark", detail: false)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -88,8 +95,8 @@ struct TernPanel: View {
     }
 
     private var summary: String {
-        let count = model.backWithYou.count
-        return count == 0 ? "All quiet" : "\(count) your turn"
+        let count = model.attentionQueue.count
+        return count == 0 ? "All quiet" : "\(count) need\(count == 1 ? "s" : "") you"
     }
 
     @ViewBuilder
@@ -110,6 +117,7 @@ struct TernPanel: View {
                         isExpanded: expandedID == workstream.id,
                         toggle: { expandedID = expandedID == workstream.id ? nil : workstream.id }
                     )
+                    .contextMenu { importanceMenu(for: workstream) }
                 }
             }
         }
@@ -140,6 +148,7 @@ struct TernPanel: View {
                     }
                 }
                 .padding(.vertical, 2)
+                .contextMenu { importanceMenu(for: workstream) }
             }
         } label: {
             Text("\(title.uppercased()) · \(workstreams.count)")
@@ -148,6 +157,27 @@ struct TernPanel: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8)
+    }
+
+    /// Lets the user say how much a repository matters. Only for work with a known repository.
+    @ViewBuilder
+    private func importanceMenu(for workstream: Workstream) -> some View {
+        if let repository = workstream.pullRequest?.repository {
+            let current = model.importance(of: workstream)
+            Section("\(repository) is…") {
+                ForEach(RepositoryImportance.allCases, id: \.self) { value in
+                    Button {
+                        model.setImportance(value, for: workstream)
+                    } label: {
+                        if value == current {
+                            Label(value.rawValue.capitalized, systemImage: "checkmark")
+                        } else {
+                            Text(value.rawValue.capitalized)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var footer: some View {

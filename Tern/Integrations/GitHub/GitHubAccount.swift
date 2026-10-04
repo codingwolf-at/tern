@@ -21,12 +21,11 @@ final class GitHubAccount {
     init(
         ingestion: IngestionService,
         cli: GitHubCLI = GitHubCLI(),
-        bookmarks: any GitHubSyncBookmarks = UserDefaultsSyncBookmarks(),
         interval: TimeInterval = GitHubSyncService.defaultInterval,
         startSyncing: Bool = true,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
-        service = GitHubSyncService(cli: cli, ingestion: ingestion, bookmarks: bookmarks, interval: interval, now: now)
+        service = GitHubSyncService(cli: cli, ingestion: ingestion, interval: interval, now: now)
         Task { [weak self, service] in
             for await status in service.statusUpdates {
                 self?.sync = status

@@ -18,7 +18,7 @@ struct TernApp: App {
         MenuBarExtra {
             TernPanel(model: model)
         } label: {
-            MenuBarLabel(backWithYouCount: model.backWithYou.count)
+            MenuBarLabel(needsYouCount: model.attentionQueue.count)
         }
         .menuBarExtraStyle(.window)
     }

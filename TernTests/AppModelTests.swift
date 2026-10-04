@@ -15,8 +15,8 @@ struct AppModelTests {
         fixture.add(.agentCompleted, from: .agent, EventFixture.claude())
         try await service.ingest(fixture.observed)
 
-        try await waitUntil { model.backWithYou.count == 1 }
-        #expect(model.backWithYou.first?.status.headline == "Claude finished")
+        try await waitUntil { model.needsYou.count == 1 }
+        #expect(model.needsYou.first?.status.headline == "Claude finished")
         #expect(model.waiting.isEmpty)
     }
 

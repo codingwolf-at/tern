@@ -132,11 +132,15 @@ struct GitHubPullRequest: Codable, Sendable, Hashable {
     }
 
     struct Review: Codable, Sendable, Hashable {
+        struct CommitRef: Codable, Sendable, Hashable { let oid: String }
+
         let databaseId: Int
         /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`, `PENDING`.
         let state: String
         let submittedAt: Date?
         let author: GitHubActor?
+        /// The head commit the review was submitted on.
+        let commit: CommitRef?
     }
 
     struct Comment: Codable, Sendable, Hashable {

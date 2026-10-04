@@ -48,7 +48,7 @@ enum GitHubQueries {
       repository { databaseId nameWithOwner }
       headRepository { nameWithOwner }
       reviewRequests(first: 20) { nodes { requestedReviewer { ...TernReviewer } } }
-      reviews(last: 30) { nodes { databaseId state submittedAt author { ...TernActor } } }
+      reviews(last: 30) { nodes { databaseId state submittedAt author { ...TernActor } commit { oid } } }
       reviewThreads(last: 30) {
         nodes {
           id isResolved
