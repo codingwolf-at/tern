@@ -6,7 +6,7 @@ import Testing
 @Suite("GitHub ownership")
 struct GitHubOwnershipTests {
     private func evaluate(_ prs: GitHubPullRequest..., requested: Bool = false) async throws -> Workstream {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         for pr in prs {
             try await service.ingest(GH.events(pr, requested: requested))
@@ -147,7 +147,7 @@ struct GitHubOwnershipTests {
 
     @Test("The review loop: reviewer → me → reviewer → me")
     func reviewLoop() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         func step(_ pr: GitHubPullRequest) async throws -> Workstream {
             try await service.ingest(GH.events(pr))
@@ -191,7 +191,7 @@ struct GitHubOwnershipTests {
 struct GitHubLinkingTests {
     @Test("A PR joins the Claude workstream on the same repository and branch")
     func joinsClaudeWorkstream() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         let receiver = await ClaudeHookReceiver(service: service)
         let payload = ClaudeHookPayload(
@@ -211,7 +211,7 @@ struct GitHubLinkingTests {
 
     @Test("An unmatched PR creates its own workstream, once")
     func createsOnce() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         let first = try await service.ingest(GH.events(GH.pr()))
         #expect(first.createdWorkstreams.count == 1)
@@ -225,7 +225,7 @@ struct GitHubLinkingTests {
 
     @Test("Existing links are not re-pointed")
     func linksStay() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.register(WorkstreamID("a"), title: "A", pullRequest: PullRequestReference(repository: "acme/web", number: 421))
         try await service.register(WorkstreamID("b"), title: "B", references: [.branch("feat/avatar-migration", repository: "github.com/acme/web")])

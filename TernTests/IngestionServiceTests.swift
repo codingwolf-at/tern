@@ -126,7 +126,7 @@ struct IngestionServiceTests {
 
     @Test("Ingesting before start is rejected")
     func requiresStart() async {
-        let service = IngestionService(store: InMemoryTernStore())
+        let service = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         await #expect(throws: IngestionError.self) {
             try await service.ingest(history)
         }
@@ -138,7 +138,7 @@ struct IngestionServiceTests {
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let store = JSONFileTernStore(url: url)
 
-        let service = IngestionService(store: store, now: { EventFixture.origin })
+        let service = IngestionService(store: store, now: { EventFixture.origin }, scoping: .ignoringContexts)
         try await service.start()
         try await service.register(EventFixture.workstreamID, title: "Test", references: [EventFixture.reference])
         try await service.ingest(history)

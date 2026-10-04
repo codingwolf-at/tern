@@ -228,14 +228,14 @@ struct GitHubHarness {
 
     init() async throws {
         let store = InMemoryTernStore()
-        let ingestion = IngestionService(store: store, now: { GH.t0 })
+        let ingestion = IngestionService(store: store, now: { GH.t0 }, scoping: .ignoringContexts)
         try await ingestion.start()
         self.init(github: FakeGitHubCLI(), store: store, ingestion: ingestion)
     }
 
     /// The same GitHub and store, as if Tern relaunched.
     func relaunched() async throws -> GitHubHarness {
-        let ingestion = IngestionService(store: store, now: { GH.t0 })
+        let ingestion = IngestionService(store: store, now: { GH.t0 }, scoping: .ignoringContexts)
         try await ingestion.start()
         return GitHubHarness(github: github, store: store, ingestion: ingestion)
     }

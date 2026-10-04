@@ -7,7 +7,7 @@ struct MockScenarioTests {
     let scenario = MockScenario(now: Date(timeIntervalSince1970: 1_800_000_000))
 
     private func seededService(liveTail: Int = 0) async throws -> IngestionService {
-        let service = IngestionService(store: InMemoryTernStore(), now: { scenario.now })
+        let service = IngestionService(store: InMemoryTernStore(), now: { scenario.now }, scoping: .ignoringContexts)
         try await service.start()
         try await scenario.seed(into: service, liveTail: liveTail)
         return service

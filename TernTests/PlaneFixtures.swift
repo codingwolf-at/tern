@@ -134,7 +134,7 @@ struct PlaneHarness {
 
     init(token: String? = "plane_api_valid_test_token") async throws {
         credentials = InMemoryPlaneCredentials(token.map { ["plane": $0] } ?? [:])
-        ingestion = IngestionService(store: store, now: { PL.t0 })
+        ingestion = IngestionService(store: store, now: { PL.t0 }, scoping: .ignoringContexts)
         try await ingestion.start()
         sync = PlaneSyncService(credentials: credentials, http: plane, ingestion: ingestion, now: { PL.at(60) })
         await sync.configure(PL.workspace)

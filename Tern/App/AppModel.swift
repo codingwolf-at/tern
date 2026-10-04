@@ -26,6 +26,14 @@ final class AppModel {
     private let service: IngestionService
     private let logger = Logger(subsystem: "so.plane.tern", category: "app")
 
+    typealias Change = @Sendable (IngestionService) async throws -> Void
+    /// The user's changes (context, classification, importance), saved one at a time in the
+    /// order they were made. Separate tasks could run out of order and save an older choice last.
+    private let changes: AsyncStream<Change>.Continuation
+    /// Changes made here but not yet saved. Until they are, snapshots (which may predate them)
+    /// don't overwrite what the user just chose.
+    private var pendingChanges = 0
+
     #if DEBUG
     init(service: IngestionService, github: GitHubAccount? = nil, plane: PlaneAccount? = nil, scenarioPlayer: ScenarioPlayer? = nil) {
         self.service = service
@@ -33,6 +41,9 @@ final class AppModel {
         self.github = github
         self.plane = plane
         self.scenarioPlayer = scenarioPlayer
+        let (stream, continuation) = AsyncStream<Change>.makeStream()
+        changes = continuation
+        applyChanges(from: stream)
         observe()
     }
     #else
@@ -41,6 +52,9 @@ final class AppModel {
         self.claudeHooks = ClaudeHookReceiver(service: service)
         self.github = github
         self.plane = plane
+        let (stream, continuation) = AsyncStream<Change>.makeStream()
+        changes = continuation
+        applyChanges(from: stream)
         observe()
     }
     #endif
@@ -52,7 +66,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "github.importedLogins")
         let rules = WorkflowRules.load(from: .standard)
         #if DEBUG
-        let service = IngestionService(store: InMemoryTernStore(), rules: rules, scopesByContext: true)
+        let service = IngestionService(store: InMemoryTernStore(), rules: rules)
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
         return AppModel(
             service: service,
@@ -62,7 +76,7 @@ final class AppModel {
         )
         #else
         do {
-            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules, scopesByContext: true)
+            let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()), rules: rules)
             return AppModel(service: service, github: GitHubAccount(ingestion: service), plane: PlaneAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
@@ -76,8 +90,9 @@ final class AppModel {
 
     private(set) var activeContext: TernContext = .professional
     private(set) var contextRules = ContextRules()
-    /// Whether work is separated into personal and professional (always, in the app).
-    private(set) var isContextScoped = false
+    /// Whether work is limited to the active context: always in the app, off only for
+    /// Debug-built tests that ignore contexts.
+    private(set) var isContextScoped = true
 
     func context(of workstream: Workstream) -> WorkstreamContext {
         contextRules.context(of: workstream)
@@ -99,14 +114,15 @@ final class AppModel {
     /// Switches context. The panel and badge update at once; the choice is saved.
     func setActiveContext(_ context: TernContext) {
         activeContext = context
-        Task { [service] in try? await service.setActiveContext(context) }
+        save { try await $0.setActiveContext(context) }
     }
 
-    /// Classifies a GitHub owner's repositories, or with `repository`, just that one.
+    /// Classifies a GitHub owner's repositories, or with `repository`, just that one; `nil`
+    /// clears the rule. Affected work moves at once; the rule is saved.
     func setContext(_ context: TernContext?, forOwner owner: String? = nil, repository: String? = nil) {
         if let owner { contextRules.set(context, forOwner: owner) }
         if let repository { contextRules.set(context, forRepository: repository) }
-        Task { [service] in try? await service.setContext(context, forOwner: owner, repository: repository) }
+        save { try await $0.setContext(context, forOwner: owner, repository: repository) }
     }
 
     // MARK: - Queue
@@ -181,7 +197,34 @@ final class AppModel {
     /// Marks how much a repository matters. Saved with Tern's state.
     func setImportance(_ value: RepositoryImportance, for workstream: Workstream) {
         guard let repository = workstream.pullRequest?.repository else { return }
-        Task { [service] in try? await service.setImportance(value, forRepository: repository) }
+        importance[RepositoryImportance.key(forRepository: repository)] = value == .normal ? nil : value
+        save { try await $0.setImportance(value, forRepository: repository) }
+    }
+
+    // MARK: - Saving changes
+
+    private func save(_ change: @escaping Change) {
+        pendingChanges += 1
+        changes.yield(change)
+    }
+
+    /// Saves changes strictly in order, on one task.
+    private func applyChanges(from stream: AsyncStream<Change>) {
+        Task { [weak self, service] in
+            for await change in stream {
+                do {
+                    try await change(service)
+                } catch {
+                    self?.logger.error("Couldn't save a change: \(error)")
+                }
+                self?.pendingChanges -= 1
+            }
+        }
+    }
+
+    /// Waits until every change made so far is saved.
+    func changesSaved() async {
+        while pendingChanges > 0 { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
     // MARK: - Service
@@ -201,10 +244,13 @@ final class AppModel {
                 guard let self else { return }
                 self.workstreams = snapshot.workstreams
                 self.unresolvedAssociations = snapshot.unresolvedAssociations
-                self.importance = snapshot.repositoryImportance
-                self.activeContext = snapshot.activeContext
-                self.contextRules = snapshot.contextRules
                 self.isContextScoped = snapshot.isContextScoped
+                // A snapshot taken before the user's latest changes were saved would undo them.
+                if self.pendingChanges == 0 {
+                    self.importance = snapshot.repositoryImportance
+                    self.activeContext = snapshot.activeContext
+                    self.contextRules = snapshot.contextRules
+                }
             }
         }
     }

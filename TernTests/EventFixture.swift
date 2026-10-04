@@ -51,7 +51,7 @@ struct EventFixture {
 
 /// A started service over an in-memory store, with the fixture's workstream registered.
 func makeService(store: InMemoryTernStore = InMemoryTernStore()) async throws -> IngestionService {
-    let service = IngestionService(store: store, now: { EventFixture.origin })
+    let service = IngestionService(store: store, now: { EventFixture.origin }, scoping: .ignoringContexts)
     try await service.start()
     try await service.register(EventFixture.workstreamID, title: "Test", references: [EventFixture.reference])
     return service

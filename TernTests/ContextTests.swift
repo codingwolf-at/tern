@@ -36,7 +36,7 @@ struct ContextTests {
 
     private func service(_ store: InMemoryTernStore = InMemoryTernStore(), active: TernContext = .professional,
                          rules: ContextRules = ContextTests.rules) async throws -> IngestionService {
-        let service = IngestionService(store: store, scopesByContext: true, now: { GH.t0 })
+        let service = IngestionService(store: store, now: { GH.t0 })
         try await service.start()
         try await service.setActiveContext(active)
         for (owner, context) in rules.owners { try await service.setContext(context, forOwner: owner) }
@@ -193,11 +193,16 @@ struct ContextTests {
         let store = InMemoryTernStore()
         let first = try await service(store, active: .personal)
         try await first.setContext(.professional, repository: "atul/work-notes")
-        let restarted = IngestionService(store: store, scopesByContext: true)
+        let restarted = IngestionService(store: store)
         let snapshot = try await restarted.start()
         #expect(snapshot.activeContext == .personal)
         #expect(snapshot.contextRules.context(forRepository: "atul/work-notes") == .professional)
         #expect(snapshot.contextRules.context(forRepository: Self.work) == .professional)
+
+        // Importance saved under its old name loads as low priority, and saves under the new one.
+        let importance = try JSONDecoder().decode([String: RepositoryImportance].self, from: Data(#"{"github.com/a/b":"personal"}"#.utf8))
+        #expect(importance == ["github.com/a/b": .lowPriority])
+        #expect(String(decoding: try JSONEncoder().encode(RepositoryImportance.lowPriority), as: UTF8.self) == #""lowPriority""#)
 
         // State written before contexts existed loads as Professional with no rules.
         let legacy = #"{"version":1,"workstreams":[],"links":[],"shownTransitions":[],"notifications":[]}"#
@@ -206,9 +211,9 @@ struct ContextTests {
         #expect(decoded.contextRules == .none)
     }
 
-    @Test("Without context scoping (engine tests, tools) every workstream takes part")
+    @Test("Debug-only ignoring of contexts (engine tests) lets every workstream take part")
     func unscopedIgnoresContexts() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         let report = try await service.ingest(failingPR(Self.stranger, 1))
         #expect(report.notifications.count == 1)
@@ -216,6 +221,73 @@ struct ContextTests {
         try await settle(model) { model.workstreams.count == 1 }
         #expect(model.attentionQueue.count == 1)
         #expect(model.unclassified.isEmpty)
+    }
+
+    @Test("The app's service is always context-scoped; ignoring contexts is an explicit Debug-only opt-out")
+    func scopedByDefault() async throws {
+        let service = IngestionService(store: InMemoryTernStore())
+        #expect(try await service.start().isContextScoped)
+        #expect(try await service.ingest(failingPR(Self.stranger, 1)).notifications.isEmpty)
+    }
+
+    @Test("Switching back surfaces pending work in the queue without re-notifying; switching alone never notifies")
+    func switchingSurfacesWithoutDuplicates() async throws {
+        let store = InMemoryTernStore()
+        let service = try await service(store, active: .professional)
+        let model = try await model(service)
+        // A: professional work while Professional is active notifies once.
+        #expect(try await service.ingest(failingPR(Self.work, 1)).notifications.count == 1)
+        // B, D: switch to Personal; professional work changes quietly, and so does personal work while away later.
+        model.setActiveContext(.personal)
+        await model.changesSaved()
+        #expect(try await service.ingest(failingPR(Self.work, 2)).notifications.isEmpty)
+        // C: back in Professional, both professional items are in the queue.
+        model.setActiveContext(.professional)
+        await model.changesSaved()
+        try await settle(model) { model.workstreams.count == 2 }
+        #expect(model.needsYou.compactMap(\.pullRequest?.number).sorted() == [1, 2])
+        // D: personal work while Professional is active is quiet; E: it surfaces in Personal.
+        #expect(try await service.ingest(failingPR(Self.side, 3)).notifications.isEmpty)
+        try await settle(model) { model.workstreams.count == 3 }
+        #expect(model.needsYou.count == 2)
+        model.setActiveContext(.personal)
+        #expect(model.needsYou.map(\.pullRequest?.number) == [3])
+        // Switching back and forth, and replaying the same events, adds no notifications.
+        for context in [TernContext.professional, .personal, .professional] { try await service.setActiveContext(context) }
+        #expect(try await service.ingest(failingPR(Self.work, 1) + failingPR(Self.side, 3)).notifications.isEmpty)
+        #expect(store.load().notifications.count == 1)
+    }
+
+    @Test("Classifying: owner rules apply at once, repository overrides win and stay put, clearing returns to unclassified")
+    func classificationEdits() async throws {
+        let service = try await service(active: .personal, rules: .none)
+        try await service.ingest(failingPR("acme/api", 1) + failingPR("acme/web", 2) + failingPR(Self.side, 3), mode: .historyImport)
+        let model = try await model(service)
+        #expect(model.unclassified.count == 3)
+        #expect(model.needsYou.isEmpty)
+
+        model.setContext(.personal, forOwner: "acme")
+        #expect(model.needsYou.compactMap(\.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
+        model.setContext(.professional, repository: "acme/web")
+        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/api"])
+        // Changing the owner again doesn't move the overridden repository.
+        model.setContext(.professional, forOwner: "acme")
+        model.setActiveContext(.professional)
+        #expect(model.needsYou.compactMap(\.pullRequest?.repository).sorted() == ["acme/api", "acme/web"])
+        model.setContext(.personal, repository: "acme/api")
+        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/web"])
+        // Clearing the owner leaves only the overrides.
+        model.setContext(nil, forOwner: "acme")
+        #expect(model.needsYou.map(\.pullRequest?.repository) == ["acme/web"])
+        model.setContext(nil, repository: "acme/web")
+        #expect(model.needsYou.isEmpty)
+        #expect(model.unclassified.compactMap(\.pullRequest?.repository).sorted() == ["acme/web", "atul/blog"])
+
+        // All of it was saved, in order.
+        await model.changesSaved()
+        let saved = await service.snapshot.contextRules
+        #expect(saved == model.contextRules)
+        #expect(saved.repositories == ["github.com/acme/api": .personal])
     }
 
     @Test("Scoping filters; it never changes a workstream's priority")
@@ -257,7 +329,7 @@ struct MergeHandOffContextTests {
 
     @Test("Handed-off merges stay out of Needs you in the professional context and never notify")
     func handOffInContext() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), rules: .standard, scopesByContext: true, now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), rules: .standard, now: { GH.t0 })
         try await service.start()
         try await service.setContext(.professional, forOwner: "acme")
         var pr = GH.pr(reviews: [GH.review(1, "APPROVED", by: "sarah", at: GH.at(5), on: "sha1")], timeline: [labeled("L1", at: 10)])

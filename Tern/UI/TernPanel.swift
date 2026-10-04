@@ -122,6 +122,11 @@ struct TernPanel: View {
     /// right-click files the owner (or just the repository) under Personal or Professional.
     private var unclassifiedSection: some View {
         DisclosureGroup {
+            Text("In neither Personal nor Professional. Right-click a row to classify its owner or repository.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 2)
             ForEach(model.unclassified) { workstream in
                 HStack(spacing: 8) {
                     Image(systemName: "questionmark")
@@ -154,18 +159,28 @@ struct TernPanel: View {
     private func classifyMenu(for workstream: Workstream) -> some View {
         if let repository = workstream.repositoryKey, let owner = ContextRules.owner(of: repository) {
             let name = repository.replacingOccurrences(of: "github.com/", with: "")
+            let rules = model.contextRules
             Section("Everything from \(owner) is…") {
-                ForEach(TernContext.allCases, id: \.self) { context in
-                    Button(context.title) { model.setContext(context, forOwner: owner) }
-                }
+                classifyOptions(current: rules.owners[owner], clearTitle: "Unclassified") { model.setContext($0, forOwner: owner) }
             }
             Section("Only \(name) is…") {
-                ForEach(TernContext.allCases, id: \.self) { context in
-                    Button(context.title) { model.setContext(context, repository: repository) }
-                }
+                classifyOptions(current: rules.repositories[repository], clearTitle: "Same as \(owner)") { model.setContext($0, repository: repository) }
             }
         } else {
             Text("Only work in a GitHub repository can be classified")
+        }
+    }
+
+    /// Personal, Professional and a way back, with a checkmark on the rule in force.
+    @ViewBuilder
+    private func classifyOptions(current: TernContext?, clearTitle: String, set: @escaping (TernContext?) -> Void) -> some View {
+        ForEach(TernContext.allCases, id: \.self) { context in
+            Button { set(context) } label: {
+                if current == context { Label(context.title, systemImage: "checkmark") } else { Text(context.title) }
+            }
+        }
+        if current != nil {
+            Button(clearTitle) { set(nil) }
         }
     }
 
@@ -251,9 +266,9 @@ struct TernPanel: View {
                         model.setImportance(value, for: workstream)
                     } label: {
                         if value == current {
-                            Label(value.rawValue.capitalized, systemImage: "checkmark")
+                            Label(value.title, systemImage: "checkmark")
                         } else {
-                            Text(value.rawValue.capitalized)
+                            Text(value.title)
                         }
                     }
                 }

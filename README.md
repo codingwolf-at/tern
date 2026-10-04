@@ -32,7 +32,7 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 - **Menu bar app.** A native SwiftUI `MenuBarExtra` with a badge counting what needs you.
 - **Workstreams, not events.** A Plane work item, its pull request and the Claude Code sessions working on it are linked into one workstream.
 - **Ownership detection.** For each workstream Tern works out who holds the next action: you, an agent, a reviewer, CI, someone external, or nobody.
-- **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, personal, muted).
+- **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, low priority, muted). This is a ranking preference, separate from Personal/Professional contexts.
 - **Panel sections.** *Needs you*, *Waiting*, *Active*, *Your other work*, *Done today* and *Idle*.
 - **Personal / Professional contexts.** Work is separated into two contexts; only the active one counts toward the queue and badge.
 - **Transition-based alerts.** Tern decides whether a change is worth surfacing by comparing it against what you were last shown, and marks genuinely new items in the panel.
@@ -92,7 +92,7 @@ Every surfaced item carries a reason (review requested, CI failed, agent needs i
 
 ## Contexts
 
-Personal and Professional are a domain-level split, not a view filter. The active context determines what takes part in the attention queue, ranking and badge; switching recalculates all of it.
+Personal and Professional are a domain-level split, not a view filter. The active context determines what takes part in the attention queue, ranking, badge and notifications; switching recalculates all of it. Work in the other context keeps syncing quietly and is waiting in its own queue when you switch back.
 
 | Personal | Professional |
 | --- | --- |
@@ -100,7 +100,7 @@ Personal and Professional are a domain-level split, not a view filter. The activ
 | Agent sessions in personal repos | Plane work items |
 | — | Agent sessions in work repos |
 
-Nothing is inferred. You classify a GitHub owner (or a single repository) once from the panel's context menu; work in an unclassified repository is listed separately until you do. Plane is professional-only.
+Nothing is inferred. You classify a GitHub owner (or a single repository, which overrides its owner) once by right-clicking it in the panel; unknown repositories are intentionally *unclassified* and appear in neither context — only in a small Unclassified list — until you do. Plane is professional-only; a Plane item linked to a repository you marked Personal is a conflict and stays unclassified.
 
 ## Integrations
 

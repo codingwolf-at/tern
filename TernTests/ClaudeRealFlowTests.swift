@@ -177,7 +177,7 @@ struct ClaudeRealFlowTests {
 
     /// WEB-9295 tracked in Plane, with an approved PR on its branch, imported as history.
     private func workstream() async throws -> IngestionService {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.ingest(PL.events(PL.item()) + GH.events(GH.pr(head: "fix/WEB-9295-chevron", headSHA: "sha1",
                                      reviews: [GH.review(1, "APPROVED", by: "sarah", at: GH.at(5), on: "sha1")])), mode: .historyImport)

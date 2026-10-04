@@ -173,7 +173,7 @@ struct ClaudeHookTransportTests {
 @MainActor
 struct ClaudeSessionTests {
     private func makeReceiver() async throws -> (ClaudeHookReceiver, IngestionService) {
-        let service = IngestionService(store: InMemoryTernStore(), now: { Date(timeIntervalSince1970: 1_800_000_000) })
+        let service = IngestionService(store: InMemoryTernStore(), now: { Date(timeIntervalSince1970: 1_800_000_000) }, scoping: .ignoringContexts)
         try await service.start()
         return (ClaudeHookReceiver(service: service), service)
     }

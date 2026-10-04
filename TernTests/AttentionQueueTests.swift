@@ -92,7 +92,7 @@ struct ImportStateTests {
 @Suite("Approvals on the current head")
 struct ApprovalTests {
     private func evaluate(_ prs: GitHubPullRequest...) async throws -> Workstream {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         for pr in prs { try await service.ingest(GH.events(pr)) }
         return try #require(await service.snapshot.workstreams.first)
@@ -160,7 +160,7 @@ struct AgentMergeTests {
 
     @Test("An agent at work blocks a merge recommendation")
     func agentBlocksMerge() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.ingest(GH.events(approved))
         try await service.ingest([try claude("UserPromptSubmit", seq: 1)])
@@ -173,7 +173,7 @@ struct AgentMergeTests {
 
     @Test("When the agent finishes, the turn comes back to me")
     func agentFinishes() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.ingest(GH.events(approved))
         try await service.ingest([try claude("UserPromptSubmit", seq: 1), try claude("Stop", seq: 2)])
@@ -184,7 +184,7 @@ struct AgentMergeTests {
 
     @Test("An agent needing input stays high and outranks a merge elsewhere")
     func needsInputRanks() async throws {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.ingest(GH.events(GH.pr(id: "PR_2", number: 430, title: "Other", head: "other",
                                                  reviews: [GH.review(1, "APPROVED", by: "sarah", at: GH.at(5), on: "sha1")])))
@@ -202,7 +202,7 @@ struct AgentMergeTests {
 struct AttentionQueueTests {
     /// A model over the given pull requests, with the clock at `now`.
     private func model(_ prs: [GitHubPullRequest], importance: [String: RepositoryImportance] = [:], now: Date = GH.at(60)) async throws -> AppModel {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         for (repository, value) in importance { try await service.setImportance(value, forRepository: repository) }
         try await service.ingest(prs.flatMap { GH.events($0) }, mode: .historyImport)
@@ -246,13 +246,13 @@ struct AttentionQueueTests {
         #expect(Set((m.needsYou + m.more).map(\.title)) == Set(prs.map(\.title)))
     }
 
-    @Test("Primary work outranks personal work when otherwise equal")
+    @Test("Primary work outranks low-priority work when otherwise equal")
     func relevance() {
         let now = GH.at(60)
-        let personal = workstream(id: "side", reason: .changesRequested, attention: .high, changed: GH.at(50))
+        let lowPriority = workstream(id: "side", reason: .changesRequested, attention: .high, changed: GH.at(50))
         let primary = workstream(id: "work", reason: .changesRequested, attention: .high, changed: GH.at(50))
-        let importance: (Workstream) -> RepositoryImportance = { $0.id.rawValue == "work" ? .primary : .personal }
-        #expect(PriorityModel.ranked([personal, primary], importance: importance, now: now).map(\.id.rawValue) == ["work", "side"])
+        let importance: (Workstream) -> RepositoryImportance = { $0.id.rawValue == "work" ? .primary : .lowPriority }
+        #expect(PriorityModel.ranked([lowPriority, primary], importance: importance, now: now).map(\.id.rawValue) == ["work", "side"])
     }
 
     @Test("Marking a repository updates the queue")
@@ -264,14 +264,14 @@ struct AttentionQueueTests {
         #expect(m.more.count == 1)
     }
 
-    @Test("A personal CI failure ranks below approved primary work")
-    func personalCIBelowPrimaryMerge() {
+    @Test("A low-priority CI failure ranks below approved primary work")
+    func lowPriorityCIBelowPrimaryMerge() {
         let now = GH.at(60)
         let ci = workstream(reason: .ciFailed, attention: .high, changed: GH.at(55))
         let merge = workstream(reason: .approvedReadyToMerge, attention: .medium, changed: GH.at(10))
-        let ciPersonal = PriorityModel.priority(of: ci, importance: .personal, now: now)
+        let ciLowPriority = PriorityModel.priority(of: ci, importance: .lowPriority, now: now)
         let mergePrimary = PriorityModel.priority(of: merge, importance: .primary, now: now)
-        #expect(mergePrimary > ciPersonal)
+        #expect(mergePrimary > ciLowPriority)
         // And at equal (normal) relevance, the failure still wins: relevance is the user's lever.
         #expect(PriorityModel.priority(of: ci, importance: .normal, now: now) > PriorityModel.priority(of: merge, importance: .normal, now: now))
     }
@@ -314,10 +314,10 @@ struct AttentionQueueTests {
     @Test("Repository importance is saved with Tern's state")
     func importancePersists() async throws {
         let store = InMemoryTernStore()
-        let service = IngestionService(store: store)
+        let service = IngestionService(store: store, scoping: .ignoringContexts)
         try await service.start()
-        try await service.setImportance(.personal, forRepository: "Acme/Web")
-        #expect(store.load().repositoryImportance == ["github.com/acme/web": .personal])
+        try await service.setImportance(.lowPriority, forRepository: "Acme/Web")
+        #expect(store.load().repositoryImportance == ["github.com/acme/web": .lowPriority])
         try await service.setImportance(.normal, forRepository: "acme/web")
         #expect(store.load().repositoryImportance.isEmpty)
     }

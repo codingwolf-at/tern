@@ -40,7 +40,7 @@ struct ClaudeHookEndToEndTests {
         defer { try? FileManager.default.removeItem(at: stateDirectory) }
         #expect(FileManager.default.isExecutableFile(atPath: helper.path))
 
-        let service = IngestionService(store: InMemoryTernStore())
+        let service = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         let model = AppModel(service: service)
 
         // Sensitive fields never leave the helper.
@@ -82,7 +82,7 @@ struct ClaudeHookEndToEndTests {
     @Test("URLs opened before the app is ready are delivered in order")
     func routerBuffersUntilReady() async throws {
         defer { try? FileManager.default.removeItem(at: stateDirectory) }
-        let service = IngestionService(store: InMemoryTernStore())
+        let service = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         let model = AppModel(service: service)
         let urls = try [hook("UserPromptSubmit"), hook("Stop")].map { try #require(try runHelper($0)) }
 

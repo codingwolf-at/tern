@@ -30,7 +30,7 @@ struct WorkflowRulesTests {
     }
 
     private func service(_ rules: WorkflowRules = .standard) async throws -> IngestionService {
-        let service = IngestionService(store: InMemoryTernStore(), rules: rules, now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), rules: rules, now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         return service
     }

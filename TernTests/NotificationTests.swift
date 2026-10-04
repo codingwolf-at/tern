@@ -64,7 +64,7 @@ struct NotificationTests {
         #expect(try await firstLaunch.ingest(fixture.observed).notifications.count == 1)
 
         // Same store, fresh process.
-        let relaunch = IngestionService(store: store, now: { EventFixture.origin })
+        let relaunch = IngestionService(store: store, now: { EventFixture.origin }, scoping: .ignoringContexts)
         try await relaunch.start()
         let rebuilt = try #require(await relaunch.workstream())
         #expect(rebuilt.attention == .high)

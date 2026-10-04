@@ -22,13 +22,13 @@ struct Priority: Hashable, Sendable, Comparable {
 /// |-------------|--------|-----|
 /// | Ownership   | me 40 · agent 20 · reviewer/CI/external 5 · nobody 0 | Things you can act on come first; an agent at work is your work in progress. |
 /// | Reason      | needs input 30 · changes requested 28 · CI failed / reviewer responded 26 · review requested / agent failed 24 · approved 20 · agent finished 18 · reopened 15 · changes pushed / approval outdated 8 · no reviewer 4 · draft / ready to start 2 | Direct requests from people and blocked agents outrank housekeeping. |
-/// | Relevance   | primary +25 · normal 0 · personal −20 · muted −60 | The user's own statement of what matters; never inferred from names. |
+/// | Relevance   | primary +25 · normal 0 · low priority −20 · muted −60 | The user's own statement of what matters; never inferred from names. |
 /// | Recency     | <1h +15 · <1d +10 · <3d +5 · <14d 0 · older −10 | A fresh transition is more likely to matter now than an old state. |
 /// | Active work | agent in progress +10 · planned work (linked work item) +5 | What you're doing now beats unrelated stale work. |
 ///
 /// Reason weights keep the levels apart: a person waiting on you (24–30) always beats a
 /// merge (20) at equal relevance, while one step of relevance (±20–25) can reorder them,
-/// which is the point of letting the user mark work as primary or personal.
+/// which is the point of letting the user mark work as primary or low priority.
 enum PriorityModel {
     static func priority(of workstream: Workstream, importance: RepositoryImportance, now: Date) -> Priority {
         var parts: [Priority.Part] = []
@@ -48,7 +48,7 @@ enum PriorityModel {
         let relevance = switch importance {
         case .primary: 25
         case .normal: 0
-        case .personal: -20
+        case .lowPriority: -20
         case .muted: -60
         }
         if relevance != 0 { parts.append(.init(label: importance.rawValue, points: relevance)) }

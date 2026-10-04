@@ -29,9 +29,21 @@ struct TernSnapshot: Hashable, Sendable {
     var repositoryImportance: [String: RepositoryImportance] = [:]
     var activeContext: TernContext = .professional
     var contextRules = ContextRules()
-    /// Whether the app separates personal and professional work. When `false` (e.g. most
-    /// engine tests), every workstream takes part and contexts are ignored.
-    var isContextScoped = false
+    /// Whether work is limited to the active context. Always in the app; only Debug-built
+    /// tests can turn it off (see `ContextScoping.ignoringContexts`).
+    var isContextScoped = true
+}
+
+/// Which work may notify and is shown.
+enum ContextScoping: Sendable, Equatable {
+    /// Only the active Personal/Professional context's work. The app always uses this.
+    case activeContext
+    #if DEBUG
+    /// Every workstream, contexts ignored. Lets engine and integration tests exercise
+    /// ownership and notification rules without classifying repositories first. Not compiled
+    /// into Release builds, so a shipping app can't bypass context isolation.
+    case ignoringContexts
+    #endif
 }
 
 enum IngestionError: Error {
@@ -51,7 +63,8 @@ actor IngestionService {
     private let continuation: AsyncStream<TernSnapshot>.Continuation
     private let store: any TernStore
     private let engine: AttentionEngine
-    private let isContextScoped: Bool
+    private let scoping: ContextScoping
+    private var isContextScoped: Bool { scoping == .activeContext }
     private let now: @Sendable () -> Date
 
     private var isStarted = false
@@ -64,12 +77,17 @@ actor IngestionService {
     /// - Parameters:
     ///   - rules: the user's workflow rules. Changing them takes effect on the next launch,
     ///     when every workstream is rebuilt from its events.
-    ///   - scopesByContext: only the active context's work may notify (the app). Without it,
-    ///     contexts are ignored.
-    init(store: any TernStore, rules: WorkflowRules = .none, scopesByContext: Bool = false, now: @escaping @Sendable () -> Date = { .now }) {
+    ///   - scoping: only the active context's work may notify. The default, and the only
+    ///     option in Release builds.
+    init(
+        store: any TernStore,
+        rules: WorkflowRules = .none,
+        now: @escaping @Sendable () -> Date = { .now },
+        scoping: ContextScoping = .activeContext
+    ) {
         self.store = store
         self.engine = AttentionEngine(rules: rules)
-        self.isContextScoped = scopesByContext
+        self.scoping = scoping
         self.now = now
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }

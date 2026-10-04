@@ -318,7 +318,7 @@ struct GitHubAccountTests {
     private func account(_ configure: (FakeGitHubCLI) -> Void) async throws -> GitHubAccount {
         let fake = FakeGitHubCLI()
         configure(fake)
-        let ingestion = IngestionService(store: InMemoryTernStore())
+        let ingestion = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         try await ingestion.start()
         let account = GitHubAccount(
             ingestion: ingestion,

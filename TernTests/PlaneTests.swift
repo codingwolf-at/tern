@@ -195,7 +195,7 @@ struct PlaneSyncTests {
 @MainActor
 struct PlaneAccountTests {
     private func account(_ credentials: InMemoryPlaneCredentials, _ plane: PlaneStub, defaults: UserDefaults) -> PlaneAccount {
-        let ingestion = IngestionService(store: InMemoryTernStore())
+        let ingestion = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         Task { try? await ingestion.start() }
         return PlaneAccount(
             ingestion: ingestion,
@@ -304,7 +304,7 @@ struct PlaneAccountTests {
 @Suite("Plane correlation")
 struct PlaneCorrelationTests {
     private func service() async throws -> IngestionService {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         return service
     }
@@ -418,7 +418,7 @@ struct PlaneCorrelationTests {
 @Suite("Plane vs Tern state")
 struct PlaneStateSeparationTests {
     private func evaluate(_ plane: PlaneWorkItem, _ pr: GitHubPullRequest? = nil) async throws -> Workstream {
-        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 })
+        let service = IngestionService(store: InMemoryTernStore(), now: { GH.t0 }, scoping: .ignoringContexts)
         try await service.start()
         try await service.ingest(PL.events(plane) + (pr.map { GH.events($0) } ?? []))
         return try #require(await service.snapshot.workstreams.first)
@@ -497,7 +497,7 @@ struct CredentialIsolationTests {
         let start = Date()
         try store(.release).save("plane_api_release_secret", for: "plane")
         let defaults = try #require(UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)"))
-        let ingestion = IngestionService(store: InMemoryTernStore())
+        let ingestion = IngestionService(store: InMemoryTernStore(), scoping: .ignoringContexts)
         try await ingestion.start()
         let account = PlaneAccount(ingestion: ingestion, credentials: store(.debug), http: PlaneStub(),
                                    defaults: defaults, startSyncing: false, now: { PL.t0 })
