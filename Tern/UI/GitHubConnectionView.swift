@@ -1,71 +1,69 @@
 import SwiftUI
 
-/// One compact row: GitHub connection state and the single action that fits it.
+/// Compact GitHub status. Authentication belongs to the GitHub CLI, so there's no sign-in
+/// here — only what's wrong and the command that fixes it.
 struct GitHubConnectionView: View {
     let account: GitHubAccount
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.caption2)
+                    .foregroundStyle(tint)
                 Text("GitHub")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                Text(statusText)
+                Text(summary)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                 Spacer()
-                actions
-            }
-            if case .authorizing(let code, let url) = account.state {
-                HStack(spacing: 6) {
-                    Text(code)
-                        .font(.system(.callout, design: .monospaced).weight(.semibold))
-                        .textSelection(.enabled)
-                    Text("copied · enter it at")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Link(url.host() ?? "github.com", destination: url)
-                        .font(.caption)
-                }
-            }
-            if let error = account.connectError {
-                Text(error)
+                Button("Refresh") { account.refresh() }
+                    .buttonStyle(.borderless)
                     .font(.caption)
-                    .foregroundStyle(.red)
+            }
+            if let hint {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
     }
 
-    private var statusText: String {
+    private var summary: String {
         switch account.state {
-        case .unconfigured: "No GitHub App configured in this build"
-        case .disconnected: "Not connected"
-        case .requestingCode: "Contacting GitHub…"
-        case .authorizing: "Waiting for approval"
-        case .connected(let login): login.map { "Connected as @\($0)" } ?? "Connected"
-        case .needsReconnect: "Access expired"
+        case .checking: "Checking GitHub CLI…"
+        case .connected(let login): "Connected through GitHub CLI · @\(login)"
+        case .cliUnavailable: "GitHub CLI unavailable"
+        case .notAuthenticated: "GitHub CLI is not authenticated"
+        case .rateLimited(let until): "Rate limited until \(until.formatted(date: .omitted, time: .shortened))"
+        case .failing(let reason): reason
         }
     }
 
-    @ViewBuilder
-    private var actions: some View {
+    private var hint: String? {
         switch account.state {
-        case .unconfigured:
-            EmptyView()
-        case .disconnected, .needsReconnect:
-            Button("Connect GitHub") { account.connect() }
-                .buttonStyle(.borderless)
-                .font(.caption)
-        case .requestingCode, .authorizing:
-            Button("Cancel") { account.cancel() }
-                .buttonStyle(.borderless)
-                .font(.caption)
-        case .connected:
-            Button("Disconnect") { account.disconnect() }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .help("Removes Tern's token from this Mac. Revoke access on GitHub under Settings → Applications.")
+        case .cliUnavailable: "Install it with: brew install gh"
+        case .notAuthenticated: "Run: gh auth login"
+        default: nil
+        }
+    }
+
+    private var symbol: String {
+        switch account.state {
+        case .connected: "circle.fill"
+        case .checking: "circle"
+        default: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch account.state {
+        case .connected: .green
+        case .checking: .secondary
+        default: .orange
         }
     }
 }

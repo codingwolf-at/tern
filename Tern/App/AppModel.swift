@@ -47,13 +47,13 @@ final class AppModel {
         let useMock = ProcessInfo.processInfo.environment["TERN_MOCK"] != "0"
         return AppModel(
             service: service,
-            github: GitHubAccount(clientID: GitHubAccount.configuredClientID, ingestion: service),
+            github: GitHubAccount(ingestion: service),
             scenarioPlayer: useMock ? ScenarioPlayer(service: service) : nil
         )
         #else
         do {
             let service = IngestionService(store: JSONFileTernStore(url: try JSONFileTernStore.defaultURL()))
-            return AppModel(service: service, github: GitHubAccount(clientID: GitHubAccount.configuredClientID, ingestion: service))
+            return AppModel(service: service, github: GitHubAccount(ingestion: service))
         } catch {
             let model = AppModel(service: IngestionService(store: InMemoryTernStore()))
             model.report(error)

@@ -1,10 +1,11 @@
 import Foundation
+import OSLog
 import Testing
 @testable import Tern
 
 @Suite("GitHub sync", .serialized)
 struct GitHubSyncTests {
-    @Test("First sync imports history silently and learns who I am")
+    @Test("First sync imports history silently and learns who I am from gh")
     func firstSyncSilent() async throws {
         let h = try await GitHubHarness()
         h.github.update {
@@ -17,6 +18,7 @@ struct GitHubSyncTests {
         let status = await h.sync.syncOnce()
         #expect(status.phase == .idle)
         #expect(status.login == GH.me)
+        #expect(status.isAuthenticated == true)
         #expect(status.authoredOpen == 1)
         #expect(status.reviewRequests == 1)
         #expect(status.repositories == 1)
@@ -24,7 +26,21 @@ struct GitHubSyncTests {
         #expect(await h.workstream()?.attention == .high)
         #expect(await h.workstream("Rate limiter")?.nextOwner == .me)
         #expect(h.bookmarks.hasImported(GH.me))
-        #expect(h.github.read { $0.lastToken } == "Bearer gho_test_secret_token")
+    }
+
+    @Test("Queries go through `gh api graphql` with the body on stdin")
+    func invocations() async throws {
+        let h = try await GitHubHarness()
+        h.github.update { $0.pullRequests = [GH.pr()] }
+        await h.sync.syncOnce()
+        let calls = h.github.read { $0.invocations }
+        #expect(calls.first == ["auth", "status", "--active", "--hostname", "github.com", "--json", "hosts"])
+        #expect(calls.dropFirst().allSatisfy { $0 == ["api", "graphql", "--hostname", "github.com", "--input", "-"] })
+        #expect(!calls.flatMap { $0 }.contains("token") && !calls.flatMap { $0 }.contains("--show-token"))
+
+        // Once healthy, polls don't re-check auth.
+        await h.sync.syncOnce()
+        #expect(h.github.read { $0.authChecks } == 1)
     }
 
     @Test("After the first sync, a new review request notifies")
@@ -68,12 +84,10 @@ struct GitHubSyncTests {
         await h.sync.syncOnce()
         #expect(h.github.read { $0.detailRequests } == detailFetches, "fingerprint unchanged → no detail query")
 
-        // A relaunch forgets fingerprints, so everything is fetched again.
         let relaunched = try await h.relaunched()
         await relaunched.sync.syncOnce()
         #expect(h.github.read { $0.detailRequests } == detailFetches + 1)
-        let after = await relaunched.workstream()
-        #expect(after?.events == before?.events)
+        #expect(await relaunched.workstream()?.events == before?.events)
         #expect(await relaunched.notificationCount() == 0)
         #expect(await relaunched.ingestion.snapshot.workstreams.count == 1)
     }
@@ -102,30 +116,69 @@ struct GitHubSyncTests {
         #expect(await h.workstream()?.state == .complete)
     }
 
-    @Test("Unauthorized stops syncing; existing state stays")
-    func unauthorized() async throws {
+    @Test("Missing gh is reported and recovers once installed")
+    func missingCLI() async throws {
         let h = try await GitHubHarness()
-        h.github.update { $0.pullRequests = [GH.pr(requests: [GH.reviewer("sarah")])] }
-        await h.sync.syncOnce()
-        h.github.update { $0.failure = .status(401, headers: [:]) }
+        h.github.update { $0.failure = .notInstalled }
         let status = await h.sync.syncOnce()
-        #expect(status.phase == .unauthorized)
-        #expect(await h.workstream()?.nextOwner == .reviewer)
-    }
-
-    @Test("Rate limits and network failures are reported, not fatal")
-    func failures() async throws {
-        let h = try await GitHubHarness()
-        h.github.update { $0.failure = .status(403, headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1800003600"]) }
-        #expect(await h.sync.syncOnce().phase == .rateLimited(until: Date(timeIntervalSince1970: 1_800_003_600)))
-
-        h.github.update { $0.failure = .offline }
-        let offline = await h.sync.syncOnce()
-        #expect(offline.phase == .failing)
-        #expect(offline.lastError == "Network: offline")
+        #expect(status.phase == .cliUnavailable)
+        #expect(status.isCLIAvailable == false)
+        #expect(status.lastError == "GitHub CLI not found")
 
         h.github.update { $0.failure = nil; $0.pullRequests = [GH.pr()] }
         #expect(await h.sync.syncOnce().phase == .idle)
+    }
+
+    @Test("A logged-out or rejected gh session is not authenticated; state is kept")
+    func notAuthenticated() async throws {
+        let h = try await GitHubHarness()
+        h.github.update { $0.pullRequests = [GH.pr(requests: [GH.reviewer("sarah")])] }
+        await h.sync.syncOnce()
+
+        // Session expires mid-way: the API call fails with exit 4.
+        h.github.update { $0.auth = .loggedOut }
+        var status = await h.sync.syncOnce()
+        #expect(status.phase == .notAuthenticated)
+        #expect(status.login == nil)
+        #expect(await h.workstream()?.nextOwner == .reviewer)
+
+        h.github.update { $0.auth = .rejected }
+        status = await h.sync.syncOnce()
+        #expect(status.phase == .notAuthenticated)
+
+        // `gh auth login` in a terminal; the next poll recovers.
+        h.github.update { $0.auth = .loggedIn }
+        status = await h.sync.syncOnce()
+        #expect(status.phase == .idle)
+        #expect(status.login == GH.me)
+    }
+
+    @Test("Network, rate-limit and API failures are reported, not fatal")
+    func failures() async throws {
+        let h = try await GitHubHarness()
+        h.github.update { $0.pullRequests = [GH.pr()] }
+        await h.sync.syncOnce()
+
+        h.github.update { $0.failure = .exit(1, stderr: #"Post "https://api.github.com/graphql": dial tcp: lookup api.github.com: no such host"#) }
+        var status = await h.sync.syncOnce()
+        #expect(status.phase == .failing)
+        #expect(status.lastError == "Network: unreachable")
+
+        h.github.update { $0.failure = .exit(1, stderr: "gh: API rate limit exceeded for user ID 1. (HTTP 403)") }
+        status = await h.sync.syncOnce()
+        #expect(status.phase == .rateLimited(until: GH.t0.addingTimeInterval(15 * 60)))
+
+        h.github.update { $0.failure = .exit(1, stderr: "gh: Something went wrong (HTTP 502)") }
+        status = await h.sync.syncOnce()
+        #expect(status.lastError == "GitHub: Something went wrong (HTTP 502)")
+
+        h.github.update { $0.failure = .exit(0, stderr: "", stdout: "not json") }
+        status = await h.sync.syncOnce()
+        #expect(status.lastError == "Unexpected output from GitHub CLI")
+
+        h.github.update { $0.failure = nil }
+        #expect(await h.sync.syncOnce().phase == .idle)
+        #expect(await h.workstream() != nil)
     }
 
     @Test("Low remaining rate limit pauses before fetching details")
@@ -136,130 +189,152 @@ struct GitHubSyncTests {
         #expect(status.phase == .rateLimited(until: GH.at(60)))
         #expect(h.github.read { $0.detailRequests } == 0)
     }
+}
 
-    @Test("The token never reaches Tern's state file")
-    func tokenNotPersisted() async throws {
-        let h = try await GitHubHarness()
-        h.github.update { $0.pullRequests = [GH.pr()] }
-        await h.sync.syncOnce()
-        let json = String(decoding: try JSONEncoder().encode(h.store.load()), as: UTF8.self)
-        #expect(!json.contains("gho_test_secret_token"))
-        #expect(json.contains("github:pr:100:421:opened"))
+@Suite("GitHub CLI")
+struct GitHubCLITests {
+    private func output(_ code: Int32, stderr: String = "", stdout: String = "") -> GitHubCLIOutput {
+        GitHubCLIOutput(stdout: Data(stdout.utf8), stderr: stderr, exitCode: code)
+    }
+
+    @Test("Failures are classified from exit status and stderr")
+    func classify() {
+        let now = GH.t0
+        #expect(GitHubCLI.classify(output(4, stderr: "To get started with GitHub CLI, please run:  gh auth login"), now: now) == .notAuthenticated)
+        #expect(GitHubCLI.classify(output(1, stderr: "gh: Bad credentials (HTTP 401)"), now: now) == .notAuthenticated)
+        #expect(GitHubCLI.classify(output(1, stderr: #"Post "https://api.github.com/graphql": net/http: TLS handshake timeout"#), now: now) == .network("timed out"))
+        #expect(GitHubCLI.classify(output(1, stderr: "dial tcp 127.0.0.1:9: connect: connection refused"), now: now) == .network("unreachable"))
+        #expect(GitHubCLI.classify(output(1, stderr: "gh: API rate limit exceeded"), now: now) == .rateLimited(until: now.addingTimeInterval(900)))
+        #expect(GitHubCLI.classify(output(1, stderr: "gh: Not Found (HTTP 404)\nmore"), now: now) == .api("Not Found (HTTP 404)"))
+        #expect(GitHubCLI.classify(output(0, stdout: "<html>"), now: now) == .malformedOutput)
+        #expect(GitHubCLI.classify(output(1, stderr: "gh: odd failure with ghp_abc123XYZ and github_pat_11AA_bb"), now: now)
+            == .api("odd failure with ghp_<redacted> and github_pat_<redacted>"))
+    }
+
+    @Test("Partial GraphQL errors still return data, as gh exits non-zero with JSON on stdout")
+    func partialErrors() async throws {
+        struct Runner: GitHubCLIRunner {
+            func run(_ arguments: [String], input: Data?) async throws(GitHubAPIError) -> GitHubCLIOutput {
+                let json = #"{"data":{"viewer":{"login":"atul","databaseId":1}},"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a node"}]}"#
+                return GitHubCLIOutput(stdout: Data(json.utf8), stderr: "gh: Could not resolve to a node", exitCode: 1)
+            }
+        }
+        struct Viewer: Decodable, Sendable { struct V: Decodable, Sendable { let login: String }; let viewer: V }
+        let (payload, errors) = try await GitHubCLI(runner: Runner()).graphQL("{viewer{login}}", variables: [:], as: Viewer.self)
+        #expect(payload.viewer.login == "atul")
+        #expect(errors.map(\.type) == ["NOT_FOUND"])
+    }
+
+    @Test("Auth status reads the active github.com account, never a token")
+    func authStatus() async throws {
+        let fake = FakeGitHubCLI()
+        let cli = GitHubCLI(runner: fake)
+        let status = try await cli.authStatus()
+        #expect(status == GitHubAuthStatus(host: "github.com", login: GH.me, isAuthenticated: true, tokenSource: "keyring"))
+
+        fake.update { $0.auth = .loggedOut }
+        #expect(try await cli.authStatus().isAuthenticated == false)
+        fake.update { $0.auth = .rejected }
+        let rejected = try await cli.authStatus()
+        #expect(rejected.isAuthenticated == false)
+        #expect(rejected.login == nil)
+    }
+
+    @Test("gh is found on PATH, then in common install locations, else not at all")
+    func locator() {
+        let homebrew = GitHubCLILocator(environment: ["PATH": "/usr/bin:/bin"], homeDirectory: "/Users/me", isExecutable: { $0 == "/opt/homebrew/bin/gh" })
+        #expect(homebrew.locate()?.path == "/opt/homebrew/bin/gh")
+
+        let onPath = GitHubCLILocator(environment: ["PATH": "/custom/bin:/usr/bin"], homeDirectory: "/Users/me", isExecutable: { $0 == "/custom/bin/gh" || $0 == "/opt/homebrew/bin/gh" })
+        #expect(onPath.locate()?.path == "/custom/bin/gh")
+
+        let override = GitHubCLILocator(environment: ["TERN_GH_PATH": "/tools/gh"], homeDirectory: "/Users/me", isExecutable: { _ in true })
+        #expect(override.locate()?.path == "/tools/gh")
+
+        let none = GitHubCLILocator(environment: [:], homeDirectory: "/Users/me", isExecutable: { _ in false })
+        #expect(none.locate() == nil)
+    }
+
+    @Test("A missing gh is a clear error, with no fallback")
+    func missing() async {
+        let runner = ProcessGitHubCLIRunner(locator: GitHubCLILocator(environment: [:], homeDirectory: "/nonexistent", isExecutable: { _ in false }))
+        await #expect(throws: GitHubAPIError.cliNotFound) { try await runner.run(["api", "user"], input: nil) }
+    }
+
+    @Test("The process runner captures stdout, stderr, exit status and stdin — even for large output")
+    func processRunner() async throws {
+        let script = FileManager.default.temporaryDirectory.appending(path: "fake-gh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: script) }
+        try """
+        #!/bin/sh
+        cat > /dev/null
+        echo "prompt=$GH_PROMPT_DISABLED args=$*" >&2
+        head -c 1048576 /dev/zero | tr '\\0' 'a'
+        exit 3
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let runner = ProcessGitHubCLIRunner(locator: GitHubCLILocator(environment: ["TERN_GH_PATH": script.path], homeDirectory: "/", isExecutable: { $0 == script.path }))
+        let result = try await runner.run(["api", "graphql"], input: Data(repeating: 1, count: 200_000))
+        #expect(result.exitCode == 3)
+        #expect(result.stdout.count == 1_048_576)
+        #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines) == "prompt=1 args=api graphql")
     }
 }
 
-@Suite("GitHub authentication", .serialized)
+@Suite("GitHub privacy", .serialized)
+struct GitHubPrivacyTests {
+    @Test("No credential reaches app state, defaults, diagnostics or logs")
+    func noCredentials() async throws {
+        let start = Date()
+        let secret = "gho_FakeSecretTokenValue1234567890"
+        let h = try await GitHubHarness()
+        h.github.update { $0.pullRequests = [GH.pr()] }
+        await h.sync.syncOnce()
+        // Even if gh printed something token-like on failure, it must not travel further than the error summary.
+        h.github.update { $0.failure = .exit(1, stderr: "gh: request failed for token \(secret) (HTTP 401)") }
+        let failed = await h.sync.syncOnce()
+
+        let state = String(decoding: try JSONEncoder().encode(h.store.load()), as: UTF8.self)
+        let diagnostics = String(describing: failed) + String(describing: await h.sync.status)
+        let defaults = UserDefaults.standard.dictionaryRepresentation().description
+        #expect(!state.contains("gho_"))
+        #expect(!diagnostics.contains(secret))
+        #expect(!defaults.contains(secret))
+
+        let log = try OSLogStore(scope: .currentProcessIdentifier)
+        let messages = try log.getEntries(at: log.position(date: start))
+            .compactMap { $0 as? OSLogEntryLog }
+            .filter { $0.subsystem == "so.plane.tern" }
+            .map(\.composedMessage)
+        #expect(messages.contains { $0.contains("GitHub CLI is not authenticated") })
+        #expect(!messages.contains { $0.contains(secret) })
+    }
+}
+
+@Suite("GitHub account status", .serialized)
 @MainActor
-struct GitHubAuthTests {
-    /// Answers the device-flow endpoints with a scripted sequence of token responses.
-    final class DeviceStub: GitHubHTTP, @unchecked Sendable {
-        var tokenResponses: [[String: Any]]
-        var requests: [URLRequest] = []
-
-        init(_ tokenResponses: [[String: Any]]) {
-            self.tokenResponses = tokenResponses
-        }
-
-        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-            requests.append(request)
-            let json: [String: Any] = request.url == GitHubDeviceFlow.deviceCodeURL
-                ? ["device_code": "dev-123", "user_code": "ABCD-1234", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5]
-                : tokenResponses.removeFirst()
-            return (try JSONSerialization.data(withJSONObject: json), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        }
-    }
-
-    private func flow(_ stub: DeviceStub, slept: SleepLog = SleepLog()) -> GitHubDeviceFlow {
-        var flow = GitHubDeviceFlow(clientID: "Iv1.test", http: stub, now: { GH.t0 })
-        flow.sleep = { seconds in await slept.record(seconds) }
-        return flow
-    }
-
-    actor SleepLog {
-        var intervals: [TimeInterval] = []
-        func record(_ seconds: TimeInterval) { intervals.append(seconds) }
-    }
-
-    @Test("Device flow: code, pending, slow down, token — without a client secret")
-    func deviceFlow() async throws {
-        let stub = DeviceStub([["error": "authorization_pending"], ["error": "slow_down", "interval": 10], ["access_token": "ghu_abc", "token_type": "bearer"]])
-        let log = SleepLog()
-        let flow = flow(stub, slept: log)
-        let code = try await flow.requestCode()
-        #expect(code.userCode == "ABCD-1234")
-        let credential = try await flow.waitForToken(code)
-        #expect(credential.accessToken == "ghu_abc")
-        #expect(await log.intervals == [5, 5, 10])
-        let bodies = stub.requests.compactMap { $0.httpBody.map { String(decoding: $0, as: UTF8.self) } }
-        #expect(bodies.allSatisfy { !$0.contains("client_secret") })
-        #expect(bodies.first == "client_id=Iv1.test")
-    }
-
-    @Test("Device flow: denied and expired")
-    func deviceFlowFailures() async throws {
-        let denied = flow(DeviceStub([["error": "access_denied"]]))
-        await #expect(throws: GitHubDeviceFlow.FlowError.denied) { try await denied.waitForToken(try await denied.requestCode()) }
-        let expired = flow(DeviceStub([["error": "expired_token"]]))
-        await #expect(throws: GitHubDeviceFlow.FlowError.expired) { try await expired.waitForToken(try await expired.requestCode()) }
-    }
-
-    @Test("Expiring tokens carry refresh details")
-    func expiringToken() async throws {
-        let flow = flow(DeviceStub([["access_token": "ghu_abc", "refresh_token": "ghr_def", "expires_in": 28800]]))
-        let credential = try await flow.waitForToken(try await flow.requestCode())
-        #expect(credential.refreshToken == "ghr_def")
-        #expect(credential.expiresAt == GH.t0.addingTimeInterval(28800))
-        #expect(credential.isExpired(at: GH.t0) == false)
-        #expect(credential.isExpired(at: GH.t0.addingTimeInterval(28800)))
-    }
-
-    private func account(clientID: String = "Iv1.test", credential: GitHubCredential? = nil) -> (GitHubAccount, InMemoryCredentialStore, UserDefaults) {
-        let defaults = UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)")!
-        let store = InMemoryCredentialStore(credential)
+struct GitHubAccountTests {
+    private func account(_ configure: (FakeGitHubCLI) -> Void) async throws -> GitHubAccount {
+        let fake = FakeGitHubCLI()
+        configure(fake)
         let account = GitHubAccount(
-            clientID: clientID,
             ingestion: IngestionService(store: InMemoryTernStore()),
-            credentials: store,
+            cli: GitHubCLI(runner: fake),
             bookmarks: InMemoryBookmarks(),
-            http: StubGitHub(),
-            defaults: defaults,
             startSyncing: false
         )
-        return (account, store, defaults)
+        account.refresh()
+        for _ in 0..<300 where account.state == .checking {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return account
     }
 
-    @Test("Connection state: unconfigured, disconnected, connected")
-    func connectionStates() {
-        #expect(account(clientID: "").0.state == .unconfigured)
-        #expect(account().0.state == .disconnected)
-        #expect(account(credential: GitHubCredential(accessToken: "t")).0.state == .connected(login: nil))
-    }
-
-    @Test("Syncing reveals the GitHub identity")
-    func identity() async throws {
-        let h = try await GitHubHarness()
-        #expect(await h.sync.syncOnce().login == GH.me)
-    }
-
-    @Test("Disconnect removes the local credential")
-    func disconnect() {
-        let (account, store, defaults) = account(credential: GitHubCredential(accessToken: "t"))
-        defaults.set("atul", forKey: "github.login")
-        account.disconnect()
-        #expect(store.load() == nil)
-        #expect(account.state == .disconnected)
-        #expect(defaults.string(forKey: "github.login") == nil)
-    }
-
-    @Test("The keychain store round-trips and deletes")
-    func keychain() throws {
-        let store = KeychainCredentialStore(service: "so.plane.tern.tests.\(UUID().uuidString)")
-        defer { try? store.delete() }
-        #expect(try store.load() == nil)
-        try store.save(GitHubCredential(accessToken: "first"))
-        try store.save(GitHubCredential(accessToken: "second", refreshToken: "r"))
-        #expect(try store.load() == GitHubCredential(accessToken: "second", refreshToken: "r"))
-        try store.delete()
-        #expect(try store.load() == nil)
+    @Test("Connection states mirror what gh can do")
+    func states() async throws {
+        #expect(try await account { _ in }.state == .connected(login: GH.me))
+        #expect(try await account { $0.update { $0.failure = .notInstalled } }.state == .cliUnavailable)
+        #expect(try await account { $0.update { $0.auth = .loggedOut } }.state == .notAuthenticated)
     }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 @testable import Tern
 
 /// Builders for GitHub API values, so tests read like the situations they describe.
@@ -98,23 +97,32 @@ enum GH {
     }
 }
 
-/// An in-memory GitHub that answers Tern's index and detail queries from `pullRequests`.
-final class StubGitHub: GitHubHTTP, @unchecked Sendable {
+/// A fake `gh` that answers Tern's index and detail queries from `pullRequests`, and
+/// `gh auth status` from `auth`.
+final class FakeGitHubCLI: GitHubCLIRunner, @unchecked Sendable {
     struct State {
         var viewer = GH.me
         var pullRequests: [GitHubPullRequest] = []
         /// Pull requests that show up in the "review requested from me" search.
         var reviewRequested: Set<String> = []
+        var auth: Auth = .loggedIn
         var failure: Failure?
         var detailRequests = 0
         var indexRequests = 0
+        var authChecks = 0
         var rateLimitRemaining = 4000
-        var lastToken: String?
+        var invocations: [[String]] = []
+    }
+
+    enum Auth {
+        case loggedIn
+        case loggedOut
+        case rejected
     }
 
     enum Failure {
-        case status(Int, headers: [String: String])
-        case offline
+        case notInstalled
+        case exit(Int32, stderr: String, stdout: String = "")
     }
 
     private let lock = NSLock()
@@ -128,24 +136,51 @@ final class StubGitHub: GitHubHTTP, @unchecked Sendable {
         lock.withLock { body(state) }
     }
 
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any] ?? [:]
-        let query = body["query"] as? String ?? ""
-        let variables = body["variables"] as? [String: Any] ?? [:]
-        update { state in
-            state.lastToken = request.value(forHTTPHeaderField: "Authorization")
-            if query.contains("TernIndex") { state.indexRequests += 1 } else { state.detailRequests += 1 }
-        }
+    func run(_ arguments: [String], input: Data?) async throws(GitHubAPIError) -> GitHubCLIOutput {
+        update { $0.invocations.append(arguments) }
         let snapshot = read { $0 }
-
         switch snapshot.failure {
-        case .offline:
-            throw URLError(.notConnectedToInternet)
-        case .status(let code, let headers):
-            return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!)
+        case .notInstalled:
+            throw .cliNotFound
+        case .exit(let code, let stderr, let stdout):
+            return GitHubCLIOutput(stdout: Data(stdout.utf8), stderr: stderr, exitCode: code)
         case nil:
             break
         }
+
+        if arguments.starts(with: ["auth", "status"]) {
+            update { $0.authChecks += 1 }
+            return authStatus(snapshot.auth)
+        }
+        if snapshot.auth != .loggedIn {
+            return GitHubCLIOutput(stdout: Data(), stderr: "To get started with GitHub CLI, please run:  gh auth login", exitCode: 4)
+        }
+        do {
+            return GitHubCLIOutput(stdout: try graphQL(input ?? Data(), snapshot), stderr: "", exitCode: 0)
+        } catch {
+            return GitHubCLIOutput(stdout: Data(), stderr: "gh: bad request", exitCode: 1)
+        }
+    }
+
+    /// Mirrors `gh auth status --json hosts`, including the token-source label.
+    private func authStatus(_ auth: Auth) -> GitHubCLIOutput {
+        let json: String
+        switch auth {
+        case .loggedIn:
+            json = #"{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"\#(GH.me)","tokenSource":"keyring","scopes":"repo, read:org","gitProtocol":"https"}]}}"#
+        case .loggedOut:
+            return GitHubCLIOutput(stdout: Data(#"{"hosts":{}}"#.utf8), stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login", exitCode: 0)
+        case .rejected:
+            json = #"{"hosts":{"github.com":[{"state":"error","error":"401 Unauthorized","active":true,"host":"github.com","login":"","tokenSource":"GH_TOKEN"}]}}"#
+        }
+        return GitHubCLIOutput(stdout: Data(json.utf8), stderr: "", exitCode: 0)
+    }
+
+    private func graphQL(_ input: Data, _ snapshot: State) throws -> Data {
+        let body = try JSONSerialization.jsonObject(with: input) as? [String: Any] ?? [:]
+        let query = body["query"] as? String ?? ""
+        let variables = body["variables"] as? [String: Any] ?? [:]
+        update { if query.contains("TernIndex") { $0.indexRequests += 1 } else { $0.detailRequests += 1 } }
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -154,21 +189,18 @@ final class StubGitHub: GitHubHTTP, @unchecked Sendable {
         if query.contains("TernIndex") {
             let known = Set(variables["known"] as? [String] ?? [])
             let open = snapshot.pullRequests.filter { $0.state == "OPEN" }
-            let index = GitHubIndexPayload(
+            payload = try encoder.encode(GitHubIndexPayload(
                 viewer: .init(login: snapshot.viewer, databaseId: 1),
                 rateLimit: rateLimit,
                 authored: GitHubNodes(nodes: open.filter { $0.author?.login == snapshot.viewer }.map(Self.index)),
                 requested: GitHubNodes(nodes: open.filter { snapshot.reviewRequested.contains($0.id) }.map(Self.index)),
                 known: snapshot.pullRequests.filter { known.contains($0.id) }.map(Self.index)
-            )
-            payload = try encoder.encode(index)
+            ))
         } else {
             let ids = variables["ids"] as? [String] ?? []
-            let detail = GitHubDetailPayload(rateLimit: rateLimit, nodes: ids.map { id in snapshot.pullRequests.first { $0.id == id } })
-            payload = try encoder.encode(detail)
+            payload = try encoder.encode(GitHubDetailPayload(rateLimit: rateLimit, nodes: ids.map { id in snapshot.pullRequests.first { $0.id == id } }))
         }
-        let wrapped = Data("{\"data\":".utf8) + payload + Data("}".utf8)
-        return (wrapped, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        return Data("{\"data\":".utf8) + payload + Data("}".utf8)
     }
 
     private static func index(_ pr: GitHubPullRequest) -> GitHubIndexPullRequest {
@@ -185,30 +217,18 @@ final class StubGitHub: GitHubHTTP, @unchecked Sendable {
     }
 }
 
-final class InMemoryCredentialStore: GitHubCredentialStore {
-    let credential: Mutex<GitHubCredential?>
+final class InMemoryBookmarks: GitHubSyncBookmarks, @unchecked Sendable {
+    private let lock = NSLock()
+    private var logins: Set<String> = []
 
-    init(_ credential: GitHubCredential? = nil) {
-        self.credential = Mutex(credential)
-    }
-
-    func load() -> GitHubCredential? { credential.withLock { $0 } }
-    func save(_ credential: GitHubCredential) { self.credential.withLock { $0 = credential } }
-    func delete() { credential.withLock { $0 = nil } }
+    func hasImported(_ login: String) -> Bool { lock.withLock { logins.contains(login.lowercased()) } }
+    func markImported(_ login: String) { lock.withLock { _ = logins.insert(login.lowercased()) } }
+    func clear() { lock.withLock { logins.removeAll() } }
 }
 
-final class InMemoryBookmarks: GitHubSyncBookmarks {
-    let logins = Mutex<Set<String>>([])
-
-    func hasImported(_ login: String) -> Bool { logins.withLock { $0.contains(login.lowercased()) } }
-    func markImported(_ login: String) { logins.withLock { _ = $0.insert(login.lowercased()) } }
-    func clear() { logins.withLock { $0.removeAll() } }
-}
-
-/// Sync service wired to a stub GitHub and an in-memory ingestion service.
+/// Sync service wired to a fake `gh` and an in-memory ingestion service.
 struct GitHubHarness {
-    let github: StubGitHub
-    let credentials: InMemoryCredentialStore
+    let github: FakeGitHubCLI
     let bookmarks: InMemoryBookmarks
     let store: InMemoryTernStore
     let ingestion: IngestionService
@@ -218,36 +238,22 @@ struct GitHubHarness {
         let store = InMemoryTernStore()
         let ingestion = IngestionService(store: store, now: { GH.t0 })
         try await ingestion.start()
-        self.init(
-            github: StubGitHub(),
-            credentials: InMemoryCredentialStore(GitHubCredential(accessToken: "gho_test_secret_token")),
-            bookmarks: InMemoryBookmarks(),
-            store: store,
-            ingestion: ingestion
-        )
+        self.init(github: FakeGitHubCLI(), bookmarks: InMemoryBookmarks(), store: store, ingestion: ingestion)
     }
 
-    /// The same GitHub, credentials and store, as if Tern relaunched.
+    /// The same GitHub and store, as if Tern relaunched.
     func relaunched() async throws -> GitHubHarness {
         let ingestion = IngestionService(store: store, now: { GH.t0 })
         try await ingestion.start()
-        return GitHubHarness(github: github, credentials: credentials, bookmarks: bookmarks, store: store, ingestion: ingestion)
+        return GitHubHarness(github: github, bookmarks: bookmarks, store: store, ingestion: ingestion)
     }
 
-    private init(github: StubGitHub, credentials: InMemoryCredentialStore, bookmarks: InMemoryBookmarks, store: InMemoryTernStore, ingestion: IngestionService) {
+    private init(github: FakeGitHubCLI, bookmarks: InMemoryBookmarks, store: InMemoryTernStore, ingestion: IngestionService) {
+        self.github = github
+        self.bookmarks = bookmarks
         self.store = store
         self.ingestion = ingestion
-        self.sync = GitHubSyncService(
-            client: GitHubClient(http: github, now: { GH.t0 }),
-            credentials: credentials,
-            deviceFlow: nil,
-            ingestion: ingestion,
-            bookmarks: bookmarks,
-            now: { GH.t0 }
-        )
-        self.github = github
-        self.credentials = credentials
-        self.bookmarks = bookmarks
+        self.sync = GitHubSyncService(cli: GitHubCLI(runner: github, now: { GH.t0 }), ingestion: ingestion, bookmarks: bookmarks, now: { GH.t0 })
     }
 
     func workstream(_ title: String = "Avatar migration") async -> Workstream? {
