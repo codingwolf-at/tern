@@ -341,7 +341,7 @@ final class AppModel {
 
     private func focus(_ subject: SubjectID) {
         focusedSubject = subject
-        MenuBarPanel.open()
+        MenuBarPanel.shared.show()
     }
 
     // MARK: - Service

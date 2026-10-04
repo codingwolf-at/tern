@@ -32,8 +32,17 @@ final class OpenURLRouter {
     }
 }
 
-/// AppKit entry point for `tern://` URLs. Handling them never shows a window.
+/// AppKit entry point for `tern://` URLs (handling them never shows a window) and for the
+/// menu bar icon, installed once launch has finished.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static var model: AppModel?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            if let model = Self.model { MenuBarPanel.shared.install(model: model) }
+        }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated {
             OpenURLRouter.shared.open(urls)

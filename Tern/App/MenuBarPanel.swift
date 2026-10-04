@@ -1,19 +1,78 @@
 import AppKit
+import Observation
+import SwiftUI
 
-/// Opens Tern's menu bar panel from code (e.g. after a notification click). SwiftUI's
-/// `MenuBarExtra` has no API for this, so it clicks Tern's own status item. Best effort: if the
-/// status item can't be found, Tern is only activated.
+/// Tern's menu bar icon and panel, owned in AppKit so the panel can be opened from code — e.g.
+/// by a notification click — which SwiftUI's `MenuBarExtra` has no API for. The panel is the
+/// same SwiftUI `TernPanel`, shown in a popover anchored to the icon.
 @MainActor
-enum MenuBarPanel {
-    static func open() {
+final class MenuBarPanel: NSObject {
+    static let shared = MenuBarPanel()
+
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    private var model: AppModel?
+
+    /// Creates the icon and panel. Called once, at launch.
+    func install(model: AppModel) {
+        guard statusItem == nil else { return }
+        self.model = model
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        let host = NSHostingController(rootView: TernPanel(model: model))
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        self.popover = popover
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.target = self
+        item.button?.action = #selector(toggle)
+        item.button?.imagePosition = .imageLeading
+        statusItem = item
+        updateIcon()
+    }
+
+    /// Shows the panel, bringing Tern forward. Does nothing if it's already showing.
+    func show() {
+        guard let popover, let button = statusItem?.button, !popover.isShown else { return }
         NSApp.activate()
-        for window in NSApp.windows where window.className.contains("NSStatusBarWindow") {
-            guard window.responds(to: Selector(("statusItem"))),
-                  let item = window.value(forKey: "statusItem") as? NSStatusItem,
-                  let button = item.button
-            else { continue }
-            button.performClick(nil)
-            return
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    @objc private func toggle() {
+        if popover?.isShown == true {
+            popover?.performClose(nil)
+        } else {
+            show()
         }
+    }
+
+    /// Keeps the icon in step with the attention queue: re-renders whenever what it reads changes.
+    private func updateIcon() {
+        guard let model, let button = statusItem?.button else { return }
+        let count = withObservationTracking {
+            model.attentionQueue.count
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.updateIcon() }
+        }
+        let label = Self.label(needsYou: count, build: .current)
+        button.image = NSImage(systemSymbolName: label.symbol, accessibilityDescription: nil)
+        button.image?.isTemplate = true
+        button.title = label.title
+        button.setAccessibilityLabel(label.accessibility)
+    }
+
+    /// What the icon shows. Debug builds carry a "D" so they can't be mistaken for the installed
+    /// Tern running beside them.
+    nonisolated static func label(needsYou count: Int, build: BuildEnvironment) -> (symbol: String, title: String, accessibility: String) {
+        let mark = build == .debug ? "D" : ""
+        let name = build == .debug ? "Tern Debug" : "Tern"
+        if count > 0 {
+            return ("bird.fill", " \(count)\(mark.isEmpty ? "" : " \(mark)")", "\(name), \(count) need\(count == 1 ? "s" : "") you")
+        }
+        return ("bird", mark.isEmpty ? "" : " \(mark)", name)
     }
 }

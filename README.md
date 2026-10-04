@@ -29,7 +29,7 @@ A new commit on a pull request you're reviewing, a CI run starting, an agent rea
 
 ## What it does
 
-- **Menu bar app.** A native SwiftUI `MenuBarExtra` with a badge counting what needs you.
+- **Menu bar app.** A menu bar icon with a badge counting what needs you, opening a SwiftUI panel.
 - **Workstreams, not events.** A Plane work item, its pull request and the Claude Code sessions working on it are linked into one workstream.
 - **Ownership detection.** For each workstream Tern works out who holds the next action: you, an agent, a reviewer, CI, someone external, or nobody.
 - **Attention ranking.** Work that needs you is ranked by urgency and by how much the repository matters to you (primary, normal, low priority, muted). This is a ranking preference, separate from Personal/Professional contexts.
