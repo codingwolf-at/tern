@@ -9,11 +9,13 @@ import Foundation
 /// | Event                 | ID                                                   |
 /// |-----------------------|------------------------------------------------------|
 /// | Item seen             | `plane:item:<workspace>:<item-id>:created`           |
-/// | State / assignment    | `plane:item:<workspace>:<item-id>:state:<state-id>:<assigned>:<updated-at>` |
+/// | State / assignment    | `plane:item:<workspace>:<item-id>:state:<state-id>:<assigned>` |
 /// | Archived or removed   | `plane:item:<workspace>:<item-id>:removed`           |
 struct PlaneNormalizer: Sendable {
     let workspace: PlaneWorkspace
     let userID: String
+    /// When the item was observed; used to time changes the API doesn't timestamp.
+    var observedAt: Date = .now
 
     func events(for item: PlaneWorkItem) -> [ObservedEvent] {
         guard let identifier = item.identifier?.uppercased() else { return [] }
@@ -24,8 +26,9 @@ struct PlaneNormalizer: Sendable {
 
         var events = [
             event(item, identifier, "created", .planeItemCreated, at: item.createdAt, state),
-            event(item, identifier, "state:\(item.stateID ?? "-"):\(assignedToMe ? 1 : 0):\(stamp(item.updatedAt ?? item.createdAt))",
-                  .planeItemStateChanged, at: item.updatedAt ?? item.createdAt, state),
+            // v2 doesn't expose `updated_at`, so a state is identified by what it is, and timed when seen.
+            event(item, identifier, "state:\(item.stateID ?? "-"):\(assignedToMe ? 1 : 0)",
+                  .planeItemStateChanged, at: max(item.updatedAt ?? observedAt, item.createdAt), state),
         ]
         if let archived = item.archivedAt {
             events.append(event(item, identifier, "removed", .planeItemRemoved, at: archived, [.planeItemID: item.id]))
@@ -65,7 +68,4 @@ struct PlaneNormalizer: Sendable {
         )
     }
 
-    private func stamp(_ date: Date) -> String {
-        String(Int(date.timeIntervalSince1970 * 1000))
-    }
 }

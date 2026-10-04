@@ -3,7 +3,7 @@ import Foundation
 
 enum PL {
     static let me = "user-me"
-    static let workspace = PlaneWorkspace("plane")!
+    static let workspace = try! PlaneWorkspace(slug: "plane")
     static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     static func at(_ minutes: Double) -> Date { t0.addingTimeInterval(minutes * 60) }
 

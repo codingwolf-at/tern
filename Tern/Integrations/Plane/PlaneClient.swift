@@ -1,7 +1,8 @@
 import Foundation
 
-/// Where a Plane workspace lives. Plane Cloud by default; a self-hosted instance serves the
-/// API and the web app from its own host.
+/// Where a Plane workspace lives: an API base URL and a workspace slug, kept separate.
+/// Plane Cloud's API is `https://api.plane.so`; a self-hosted instance serves the API and the
+/// web app from its own host.
 struct PlaneWorkspace: Codable, Sendable, Hashable {
     let slug: String
     let apiBase: URL
@@ -10,21 +11,48 @@ struct PlaneWorkspace: Codable, Sendable, Hashable {
     static let cloudAPI = URL(string: "https://api.plane.so")!
     static let cloudWeb = URL(string: "https://app.plane.so")!
 
-    /// Accepts a slug (`plane`) or a workspace URL (`https://app.plane.so/plane/…` or a
-    /// self-hosted `https://plane.example.com/team`).
-    init?(_ input: String) {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let url = URL(string: trimmed), let host = url.host(), let scheme = url.scheme, scheme.hasPrefix("http") {
-            guard let slug = url.pathComponents.dropFirst().first, !slug.isEmpty else { return nil }
-            let isCloud = host == "app.plane.so" || host == "api.plane.so"
-            self.slug = slug
-            self.apiBase = isCloud ? Self.cloudAPI : URL(string: "\(scheme)://\(host)")!
-            self.webBase = isCloud ? Self.cloudWeb : URL(string: "\(scheme)://\(host)")!
+    enum InputError: Error, Equatable {
+        case slugIsURL
+        case invalidSlug
+        case invalidAPIBase
+        /// The Plane web app's address was given where the API's belongs.
+        case webAppURL
+
+        var message: String {
+            switch self {
+            case .slugIsURL: "Enter just the workspace slug, e.g. plane"
+            case .invalidSlug: "Workspace slug can only use letters, numbers, - and _"
+            case .invalidAPIBase: "API URL must look like https://api.plane.so"
+            case .webAppURL: "That's the Plane web app. The API is https://api.plane.so"
+            }
+        }
+    }
+
+    /// - Parameters:
+    ///   - slug: the workspace slug, e.g. `plane` (from `app.plane.so/plane/…`).
+    ///   - api: the API base URL; Plane Cloud by default.
+    init(slug input: String, api apiInput: String = PlaneWorkspace.cloudAPI.absoluteString) throws(InputError) {
+        let slug = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if slug.contains("/") || slug.contains(":") { throw .slugIsURL }
+        guard slug.range(of: #"^[A-Za-z0-9][A-Za-z0-9_-]*$"#, options: .regularExpression) != nil else { throw .invalidSlug }
+
+        let trimmedAPI = apiInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let api = URL(string: trimmedAPI.hasSuffix("/") ? String(trimmedAPI.dropLast()) : trimmedAPI),
+              let host = api.host(), let scheme = api.scheme
+        else { throw .invalidAPIBase }
+        if host == "app.plane.so" { throw .webAppURL }
+        guard scheme == "https" || (scheme == "http" && (host == "localhost" || host == "127.0.0.1")),
+              api.path().isEmpty || api.path() == "/",
+              api.query() == nil
+        else { throw .invalidAPIBase }
+
+        self.slug = slug
+        if host == "api.plane.so" {
+            apiBase = Self.cloudAPI
+            webBase = Self.cloudWeb
         } else {
-            guard trimmed.range(of: #"^[A-Za-z0-9][A-Za-z0-9_-]*$"#, options: .regularExpression) != nil else { return nil }
-            self.slug = trimmed
-            self.apiBase = Self.cloudAPI
-            self.webBase = Self.cloudWeb
+            apiBase = URL(string: "\(scheme)://\(host)\(api.port.map { ":\($0)" } ?? "")")!
+            webBase = apiBase
         }
     }
 
@@ -80,7 +108,9 @@ struct PlaneClient: Sendable {
     let now: @Sendable () -> Date
 
     static let openStateGroups = "backlog,unstarted,started"
-    static let itemFields = "id,identifier,name,state_id,assignee_ids,project_id,created_at,updated_at,completed_at,archived_at,is_draft"
+    /// Only fields the v2 API accepts in `fields`; an unknown name is a 400.
+    /// (`updated_at` and `completed_at` are not requestable.)
+    static let itemFields = "id,identifier,name,state_id,assignee_ids,project_id,created_at,archived_at,is_draft"
     static let pageSize = 100
     static let maximumPages = 5
 
@@ -99,7 +129,6 @@ struct PlaneClient: Sendable {
                 ("state_group__in", Self.openStateGroups),
                 ("expand", "state"),
                 ("fields", Self.itemFields),
-                ("order_by", "-updated_at"),
                 ("per_page", String(Self.pageSize)),
                 ("offset", String(current)),
             ], as: PlaneWorkItemPage.self)

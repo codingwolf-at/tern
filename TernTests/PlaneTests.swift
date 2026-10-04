@@ -41,14 +41,69 @@ struct PlaneNormalizationTests {
         #expect(PlaneJSON.parseDate("2026-08-05T11:34:24Z") != nil)
     }
 
-    @Test("Workspaces from a slug, a cloud URL or a self-hosted URL")
-    func workspaces() {
-        #expect(PlaneWorkspace("plane") == PL.workspace)
-        #expect(PlaneWorkspace("https://app.plane.so/plane/browse/WEB-1/")?.slug == "plane")
-        let hosted = PlaneWorkspace("https://plane.example.com/team/projects")
-        #expect(hosted?.slug == "team")
-        #expect(hosted?.apiBase.absoluteString == "https://plane.example.com")
-        #expect(PlaneWorkspace("not a slug") == nil)
+    @Test("Workspace slug and API base are separate; Plane Cloud by default")
+    func workspaces() throws {
+        let cloud = try PlaneWorkspace(slug: "plane")
+        #expect(cloud.slug == "plane")
+        #expect(cloud.apiBase.absoluteString == "https://api.plane.so")
+        #expect(cloud.webBase.absoluteString == "https://app.plane.so")
+        #expect(try PlaneWorkspace(slug: " plane ", api: "https://api.plane.so/") == cloud)
+
+        let hosted = try PlaneWorkspace(slug: "team", api: "https://plane.example.com")
+        #expect(hosted.apiBase.absoluteString == "https://plane.example.com")
+        #expect(hosted.webBase.absoluteString == "https://plane.example.com")
+    }
+
+    @Test("Mistaken inputs are rejected with a reason, never used as an endpoint")
+    func invalidInputs() {
+        #expect(throws: PlaneWorkspace.InputError.slugIsURL) { try PlaneWorkspace(slug: "https://app.plane.so/plane/") }
+        #expect(throws: PlaneWorkspace.InputError.invalidSlug) { try PlaneWorkspace(slug: "my workspace") }
+        #expect(throws: PlaneWorkspace.InputError.webAppURL) { try PlaneWorkspace(slug: "plane", api: "https://app.plane.so") }
+        #expect(throws: PlaneWorkspace.InputError.invalidAPIBase) { try PlaneWorkspace(slug: "plane", api: "https://api.plane.so/api/v2/") }
+        #expect(throws: PlaneWorkspace.InputError.invalidAPIBase) { try PlaneWorkspace(slug: "plane", api: "http://api.plane.so") }
+        #expect(throws: PlaneWorkspace.InputError.invalidAPIBase) { try PlaneWorkspace(slug: "plane", api: "api.plane.so") }
+    }
+
+    @Test("Requests go to api.plane.so under /api/v2/, ask only for documented fields, and authenticate with X-API-Key")
+    func requestURLs() async throws {
+        final class Spy: PlaneHTTP, @unchecked Sendable {
+            let lock = NSLock()
+            var requests: [URLRequest] = []
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                lock.withLock { requests.append(request) }
+                let path = request.url!.path()
+                let body = path.hasSuffix("/users/me/") ? #"{"id":"u1"}"#
+                    : path.hasSuffix("/work-items/") ? #"{"data":[],"next":null}"#
+                    : #"{"id":"i1","identifier":"WEB-1","name":"x","created_at":"2026-01-01T00:00:00.000000Z"}"#
+                return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+        let spy = Spy()
+        let client = PlaneClient(workspace: PL.workspace, token: "plane_api_test", http: spy, now: { PL.t0 })
+        _ = try await client.me()
+        _ = try await client.openItems(assignedTo: "u1")
+        _ = try await client.item("WEB-1")
+
+        let urls = spy.requests.map(\.url!)
+        #expect(urls.map { "\($0.scheme!)://\($0.host()!)\($0.path())" } == [
+            "https://api.plane.so/api/v2/users/me/",
+            "https://api.plane.so/api/v2/workspaces/plane/work-items/",
+            "https://api.plane.so/api/v2/workspaces/plane/work-items/WEB-1/",
+        ])
+        #expect(spy.requests.allSatisfy { $0.value(forHTTPHeaderField: "X-API-Key") == "plane_api_test" && ($0.httpMethod ?? "GET") == "GET" })
+
+        let documented: Set<String> = ["archived_at", "assignee_ids", "created_at", "created_by_id", "cycle_id", "id", "identifier", "is_draft",
+                                       "label_ids", "module_ids", "name", "parent_id", "priority", "project_id", "sequence_id", "start_date",
+                                       "state_id", "target_date", "type_id"]
+        for url in urls.dropFirst() {
+            let query = Dictionary(uniqueKeysWithValues: URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value!) })
+            #expect(Set(query["fields"]!.split(separator: ",").map(String.init)).isSubset(of: documented))
+            #expect(query["order_by"] == nil)
+        }
+        let list = Dictionary(uniqueKeysWithValues: URLComponents(url: urls[1], resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value!) })
+        #expect(list["assignee_id"] == "u1")
+        #expect(list["state_group__in"] == "backlog,unstarted,started")
+        #expect(list["expand"] == "state")
     }
 
     @Test("Plane identifiers are found in branches, titles and Plane links")
@@ -171,6 +226,19 @@ struct PlaneAccountTests {
 
         account.disconnect()
         try await wait { account.state == .notConnected }
+        #expect(credentials.all.isEmpty)
+    }
+
+    @Test("A pasted web-app URL is explained, not sent to Plane")
+    func webURLInput() async throws {
+        let credentials = InMemoryPlaneCredentials()
+        let plane = PlaneStub()
+        let account = account(credentials, plane, defaults: UserDefaults(suiteName: "tern-tests-\(UUID().uuidString)")!)
+        account.connect(workspace: "https://app.plane.so/plane/", token: "plane_api_valid_test_token")
+        #expect(account.connectError == "Enter just the workspace slug, e.g. plane")
+        account.connect(workspace: "plane", api: "https://app.plane.so/plane/", token: "plane_api_valid_test_token")
+        #expect(account.connectError == "That's the Plane web app. The API is https://api.plane.so")
+        #expect(plane.read { $0.listRequests } == 0)
         #expect(credentials.all.isEmpty)
     }
 

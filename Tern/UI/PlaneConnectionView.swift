@@ -6,6 +6,7 @@ struct PlaneConnectionView: View {
 
     @State private var isEditing = false
     @State private var workspace = ""
+    @State private var api = PlaneWorkspace.cloudAPI.absoluteString
     @State private var token = ""
 
     var body: some View {
@@ -45,14 +46,22 @@ struct PlaneConnectionView: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TextField("Workspace (e.g. plane or its URL)", text: $workspace)
-            SecureField("Personal access token", text: $token)
+            LabeledContent("Workspace") {
+                TextField("slug, e.g. plane", text: $workspace)
+            }
+            LabeledContent("API") {
+                TextField("https://api.plane.so", text: $api)
+            }
+            LabeledContent("Token") {
+                SecureField("Personal access token", text: $token)
+            }
             HStack {
-                Text("Profile settings → Personal access tokens. Stored in your Keychain.")
+                Text("Slug is the part after app.plane.so/. Change API only for self-hosted Plane. Token: Profile settings → Personal access tokens; stored in your Keychain.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button("Connect") { account.connect(workspace: workspace, token: token) }
+                Button("Connect") { account.connect(workspace: workspace, api: api, token: token) }
                     .disabled(workspace.isEmpty || token.isEmpty || account.state == .connecting)
             }
         }

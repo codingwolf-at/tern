@@ -69,11 +69,14 @@ final class PlaneAccount {
     }
 
     /// Verifies the token against the workspace, then stores it in the Keychain and starts syncing.
-    func connect(workspace input: String, token: String) {
+    func connect(workspace slug: String, api: String = PlaneWorkspace.cloudAPI.absoluteString, token: String) {
         connectError = nil
         let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let workspace = PlaneWorkspace(input) else {
-            connectError = "Enter a workspace slug or URL"
+        let workspace: PlaneWorkspace
+        do {
+            workspace = try PlaneWorkspace(slug: slug, api: api)
+        } catch {
+            connectError = error.message
             return
         }
         guard !token.isEmpty else {

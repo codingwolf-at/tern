@@ -198,7 +198,7 @@ actor PlaneSyncService {
 
         let open = try await client.openItems(assignedTo: user.id)
         status.activeItems = open.count
-        let normalizer = PlaneNormalizer(workspace: workspace, userID: user.id)
+        let normalizer = PlaneNormalizer(workspace: workspace, userID: user.id, observedAt: now())
 
         // Items Tern follows that left the open list: completed, unassigned, archived or deleted.
         let openIDs = Set(open.map(\.id))
