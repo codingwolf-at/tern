@@ -181,7 +181,7 @@ scripts/release.sh
 
 This builds the **Tern** scheme in Release, then packages `Tern.app` into `dist/Tern-<version>.dmg` (the version is read from the Xcode project, so `0.1.0` today becomes `0.1.1` automatically after a version bump). The DMG also contains an `/Applications` shortcut for drag-install.
 
-Signing note: Release currently uses the project's existing ad-hoc signing configuration. A distributable Developer ID + notarization workflow will extend `scripts/release.sh` later; it is not part of this step.
+Signing: the script re-signs `Tern.app` with your **Developer ID Application** certificate, then notarizes and staples the DMG so Gatekeeper opens it on other Macs. One-time setup: create the certificate in Xcode → Settings → Accounts → Manage Certificates, then run `xcrun notarytool store-credentials tern-notary --apple-id <id> --team-id <team>`. Override with `SIGN_IDENTITY` / `NOTARY_PROFILE`.
 
 Workflow rules (such as the merge hand-off label) are read from user defaults:
 
